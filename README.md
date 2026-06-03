@@ -108,17 +108,17 @@ defaults write com.adobe.CSXS.11 PlayerDebugMode 1
 #### Windows
 
 ##### 字幕作成スクリプトファイル
-`C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels`に、`リポジトリの中身/jsx/ImportSubtitles.jsx`をコピーしてください。
+`C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels`に、`ImportSubtitles/ImportSubtitles.jsx`をコピーしてください。
 
 ##### PSD Tool AEの拡張機能ファイル
 `C:\Users\<ユーザー名>\AppData\Roaming\Adobe\CEP\extensions\`  
-上記のフォルダの中に `psdtool_ae` という名前でフォルダを作成し、リポジトリの中身をすべてコピーしてください。
+上記のフォルダの中に `psdtool_ae` という名前でフォルダを作成し、`psdtool_ae/` フォルダの中身をすべてコピーしてください。
 
 #### macOS
 ※製作者はWindowsユーザーのため、macOSでの動作確認は行っていません。以下はAIによる出力であり、正確性は保証できません。適宜読み替えてください。
 
 ##### 字幕作成スクリプトファイル
-`/Applications/Adobe After Effects 2026/Scripts/ScriptUI Panels`に、`リポジトリの中身/jsx/ImportSubtitles.jsx`をコピーしてください。
+`/Applications/Adobe After Effects 2026/Scripts/ScriptUI Panels`に、`ImportSubtitles/ImportSubtitles.jsx`をコピーしてください。
 
 ##### PSD Tool AEの拡張機能ファイル
 `/Library/Application Support/Adobe/CEP/extensions/`  

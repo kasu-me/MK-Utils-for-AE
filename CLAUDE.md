@@ -8,18 +8,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 全てのファイルはUTF-8で保存されています。
 - 本プロジェクトは日本語で開発されています。
 
+## Repository Structure
+
+This is a monorepo containing multiple independent tools:
+
+| Directory | Type | Description |
+|-----------|------|-------------|
+| [psdtool_ae/](psdtool_ae/) | CEP Extension | PSD layer visibility control panel |
+| [ImportSubtitles/](ImportSubtitles/) | ScriptUI Panel | Subtitle auto-generation script |
+| [lyrics-mapper/](lyrics-mapper/) | Browser Tool | Lyric block editor (exports JSON for AE) |
+
 ## Project Overview
 
 **PSD Tool for AE** is an Adobe After Effects CEP (Common Extensibility Platform) extension panel. It provides a UI for managing PSD layer visibility hierarchies and performing keyframe operations in After Effects. The codebase targets Japanese animation workflows (stand-art animation).
 
 ## No Build System
 
-This is a static CEP extension — no npm, no bundler, no transpilation. Files are deployed by copying them directly to the AE extension directory. There are no build, lint, or test commands.
+All tools are static — no npm, no bundler, no transpilation. CEP extensions are deployed by copying (or symlinking) directories to the AE extension path. There are no build, lint, or test commands.
 
-**Installation path (Windows):**
+**CEP extension installation path (Windows):**
 ```
 C:\Users\<user>\AppData\Roaming\Adobe\CEP\extensions\psdtool_ae\
+  → symlink target: D:\workspace_git\psdtool_ae\psdtool_ae\
 ```
+
+**ScriptUI panel installation path (Windows):**
+```
+C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels\ImportSubtitles.jsx
+  → symlink target: D:\workspace_git\psdtool_ae\ImportSubtitles\ImportSubtitles.jsx
+```
+
+To update symlinks after reorganization, run `update-symlinks-admin.ps1` as administrator.
 
 **Enabling unsigned extensions (Windows registry):**
 ```
@@ -28,7 +47,7 @@ HKEY_CURRENT_USER\Software\Adobe\CSXS.11 → PlayerDebugMode = 1
 
 ## Architecture
 
-The extension follows the standard CEP two-process architecture:
+The CEP extension (`psdtool_ae/`) follows the standard CEP two-process architecture:
 
 ```
 After Effects Host Process
@@ -38,10 +57,10 @@ CEP Panel (Chromium process)
   └── index.html + js/main.js  (Vanilla JS — runs in embedded browser)
 ```
 
-- **[js/main.js](js/main.js)** — All frontend logic: tree rendering, event handling, preset persistence (localStorage), keyframe button logic, theme sync with AE
-- **[jsx/hostscript.jsx](jsx/hostscript.jsx)** — All AE scripting: layer hierarchy traversal, visibility toggling, keyframe get/move/delete
-- **[jsx/ImportSubtitles.jsx](jsx/ImportSubtitles.jsx)** — Standalone ScriptUI panel (not part of the CEP panel) for subtitle import with BudouX Japanese line-breaking
-- **[CSXS/manifest.xml](CSXS/manifest.xml)** — Extension ID `com.example.psdtool.panel`, targets AEFT (After Effects), CSXS runtime 9.0
+- **[psdtool_ae/js/main.js](psdtool_ae/js/main.js)** — All frontend logic: tree rendering, event handling, preset persistence (localStorage), keyframe button logic, theme sync with AE
+- **[psdtool_ae/jsx/hostscript.jsx](psdtool_ae/jsx/hostscript.jsx)** — All AE scripting: layer hierarchy traversal, visibility toggling, keyframe get/move/delete
+- **[ImportSubtitles/ImportSubtitles.jsx](ImportSubtitles/ImportSubtitles.jsx)** — Standalone ScriptUI panel (not part of the CEP panel) for subtitle import with BudouX Japanese line-breaking
+- **[psdtool_ae/CSXS/manifest.xml](psdtool_ae/CSXS/manifest.xml)** — Extension ID `com.example.psdtool.panel`, targets AEFT (After Effects), CSXS runtime 9.0
 
 ## CEP Bridge Pattern
 
@@ -74,7 +93,7 @@ The PSD layer naming determines UI control type in the tree:
 | `!` | Locked — always visible, cannot be toggled |
 | (none) | Checkbox — independent toggle |
 
-This convention is parsed in `getHierarchy()` in [jsx/hostscript.jsx](jsx/hostscript.jsx).
+This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx](psdtool_ae/jsx/hostscript.jsx).
 
 ## Key Data Structures
 
@@ -96,7 +115,7 @@ This convention is parsed in `getHierarchy()` in [jsx/hostscript.jsx](jsx/hostsc
 
 ## ImportSubtitles.jsx Specifics
 
-This file is a **separate ScriptUI panel**, not loaded through CEP. It is installed to:
+**[ImportSubtitles/ImportSubtitles.jsx](ImportSubtitles/ImportSubtitles.jsx)** is a **separate ScriptUI panel**, not loaded through CEP. It is installed to:
 ```
 C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels\
 ```
