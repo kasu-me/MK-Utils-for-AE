@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Lyrics AE</title>
+  <style>
+    :root {
+      --btn-bg: #555555;
+      --btn-fg: #f0f0f0;
+      --btn-border: #666666;
+      --btn-hover: #666666;
+      --label-fg: #888888;
+      --status-fg: #888888;
+    }
+    body {
+      font-family: "Segoe UI", sans-serif;
+      font-size: 13px;
+      background: #323232;
+      color: #cccccc;
+      margin: 0;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+    .section-label {
+      font-size: 11px;
+      color: var(--label-fg);
+      margin-bottom: 4px;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    input[type="radio"] {
+      margin-right: 6px;
+    }
+    #btn-select-json {
+      display: block;
+      margin-top: 12px;
+      padding: 6px 12px;
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      border: 1px solid var(--btn-border);
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    #btn-select-json:hover {
+      background: var(--btn-hover);
+    }
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--status-fg);
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div class="section-label">配置モード</div>
+    <div>
+      <label>
+        <input type="radio" name="lyricsMode" value="layers" checked>
+        テキストレイヤを追加
+      </label>
+      <label>
+        <input type="radio" name="lyricsMode" value="keyframes">
+        1レイヤ＋キーフレーム
+      </label>
+    </div>
+
+    <button id="btn-select-json">JSONを選択して配置</button>
+    <input type="file" id="json-input" accept=".json" style="display:none">
+
+    <div id="status"></div>
+  </div>
+
+  <script src="js/CSInterface.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
