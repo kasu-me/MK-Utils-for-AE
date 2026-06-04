@@ -17,6 +17,7 @@ This is a monorepo containing multiple independent tools:
 | [psdtool_ae/](psdtool_ae/) | CEP Extension | PSD layer visibility control panel |
 | [ImportSubtitles/](ImportSubtitles/) | ScriptUI Panel | Subtitle auto-generation script |
 | [lyrics-mapper/](lyrics-mapper/) | Browser Tool | Lyric block editor (exports JSON for AE) |
+| [lyrics_ae/](lyrics_ae/) | CEP Extension | Lyrics JSON importer for After Effects |
 
 ## Project Overview
 
@@ -30,6 +31,9 @@ All tools are static — no npm, no bundler, no transpilation. CEP extensions ar
 ```
 C:\Users\<user>\AppData\Roaming\Adobe\CEP\extensions\psdtool_ae\
   → symlink target: D:\workspace_git\psdtool_ae\psdtool_ae\
+
+C:\Users\<user>\AppData\Roaming\Adobe\CEP\extensions\lyrics_ae\
+  → symlink target: D:\workspace_git\psdtool_ae\lyrics_ae\
 ```
 
 **ScriptUI panel installation path (Windows):**
@@ -112,6 +116,31 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
   "layerIndex": 3
 }
 ```
+
+## lyrics_ae Specifics
+
+**[lyrics_ae/](lyrics_ae/)** is a CEP extension panel that imports lyrics JSON (produced by `lyrics-mapper`) into After Effects. Extension ID: `com.example.lyrics.panel`.
+
+**Placement mode (selected via radio buttons in the UI):**
+
+| Mode | Behavior |
+|------|----------|
+| テキストレイヤを追加 | Creates one text layer per lyrics block; sets inPoint/outPoint to startSec/endSec |
+| 1レイヤ＋キーフレーム | Creates a single layer named "歌詞" and writes keyframes on the Source Text property |
+
+**Expected JSON format (output of `lyrics-mapper`):**
+```json
+[
+  { "startSec": 0.0, "endSec": 5.0, "text": "歌詞テキスト" }
+]
+```
+
+**Key files:**
+- **[lyrics_ae/js/main.js](lyrics_ae/js/main.js)** — Frontend: file picker, mode selection, JSON validation, bridge call
+- **[lyrics_ae/jsx/hostscript.jsx](lyrics_ae/jsx/hostscript.jsx)** — Backend: `importLyricsAsLayers()` / `importLyricsAsKeyframes()`
+- **[lyrics_ae/CSXS/manifest.xml](lyrics_ae/CSXS/manifest.xml)** — Extension ID `com.example.lyrics.panel`, targets AEFT, CSXS runtime 9.0
+
+**Keyframe mode note:** When a block's endSec matches the next block's startSec (within 0.001 s), the trailing empty-string keyframe is omitted to avoid redundancy.
 
 ## ImportSubtitles.jsx Specifics
 
