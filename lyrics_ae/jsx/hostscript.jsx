@@ -41,6 +41,14 @@ if (typeof JSON.stringify !== 'function') {
 
 // Main Functions
 
+// 秒単位の時間をコンポジションのフレーム境界にスナップする
+// Math.round で整数フレーム番号を確定してから掛け算し、
+// 浮動小数点誤差を 1e-6（マイクロ秒精度）で丸めてフレーム境界に乗せる
+function snapToFrame(timeSec, frameDuration) {
+	var frameIndex = Math.round(timeSec / frameDuration);
+	return Math.round(frameIndex * frameDuration * 1000000) / 1000000;
+}
+
 function importLyricsAsLayers(jsonStr) {
 	var lyrics;
 	try {
@@ -63,8 +71,8 @@ function importLyricsAsLayers(jsonStr) {
 
 			var layer = comp.layers.addText(block.text);
 			layer.name     = block.text;
-			layer.inPoint  = block.startSec;
-			layer.outPoint = block.endSec;
+			layer.inPoint  = snapToFrame(block.startSec, comp.frameDuration);
+			layer.outPoint = snapToFrame(block.endSec,   comp.frameDuration);
 			created++;
 		}
 
@@ -103,6 +111,8 @@ function importLyricsAsKeyframes(jsonStr) {
 		var sourceText = layer.property('ADBE Text Properties')
 		                      .property('ADBE Text Document');
 
+		var fd = comp.frameDuration;
+
 		// 最初のブロック開始前を空にするため時刻0に空文字KFを打つ
 		sourceText.setValueAtTime(0, new TextDocument(''));
 
@@ -110,14 +120,17 @@ function importLyricsAsKeyframes(jsonStr) {
 			var block = lyrics[i];
 			if (!block.text) continue;
 
+			var startSnapped = snapToFrame(block.startSec, fd);
+			var endSnapped   = snapToFrame(block.endSec,   fd);
+
 			var docStart = new TextDocument(block.text);
-			sourceText.setValueAtTime(block.startSec, docStart);
+			sourceText.setValueAtTime(startSnapped, docStart);
 
 			// 次ブロックの startSec と同時刻なら空文字KFは省略
-			var nextStart = (i + 1 < lyrics.length) ? lyrics[i + 1].startSec : null;
-			if (nextStart === null || Math.abs(block.endSec - nextStart) > 0.001) {
+			var nextStart = (i + 1 < lyrics.length) ? snapToFrame(lyrics[i + 1].startSec, fd) : null;
+			if (nextStart === null || Math.abs(endSnapped - nextStart) > 0.001) {
 				var docEnd = new TextDocument('');
-				sourceText.setValueAtTime(block.endSec, docEnd);
+				sourceText.setValueAtTime(endSnapped, docEnd);
 			}
 		}
 
