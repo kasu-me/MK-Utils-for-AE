@@ -1224,10 +1224,20 @@
 		// ═══════════════════════════════════════════════════════
 		//  コントロール
 		// ═══════════════════════════════════════════════════════
-		document.getElementById('zoomSlider').addEventListener('input', (e) => {
-			zoomPxPerSec = parseInt(e.target.value, 10);
+		function applyZoom(newZoom) {
+			newZoom = Math.max(30, Math.min(400, newZoom));
+			if (newZoom === zoomPxPerSec) return;
+			const rollScroll = document.getElementById('rollScroll');
+			const centerSec = (rollScroll.scrollLeft + rollScroll.clientWidth / 2) / zoomPxPerSec;
+			zoomPxPerSec = newZoom;
+			document.getElementById('zoomSlider').value = zoomPxPerSec;
 			document.getElementById('zoomValue').textContent = zoomPxPerSec + ' px/s';
 			render();
+			rollScroll.scrollLeft = centerSec * zoomPxPerSec - rollScroll.clientWidth / 2;
+		}
+
+		document.getElementById('zoomSlider').addEventListener('input', (e) => {
+			applyZoom(parseInt(e.target.value, 10));
 		});
 
 		document.getElementById('threshSlider').addEventListener('input', (e) => {
@@ -1892,13 +1902,7 @@
 		document.getElementById('rollScroll').addEventListener('wheel', (e) => {
 			if (!e.ctrlKey) return;
 			e.preventDefault();
-			const delta = e.deltaY > 0 ? -10 : 10;
-			const newZoom = Math.max(30, Math.min(400, zoomPxPerSec + delta));
-			if (newZoom === zoomPxPerSec) return;
-			zoomPxPerSec = newZoom;
-			document.getElementById('zoomSlider').value = zoomPxPerSec;
-			document.getElementById('zoomValue').textContent = zoomPxPerSec + ' px/s';
-			render();
+			applyZoom(zoomPxPerSec + (e.deltaY > 0 ? -10 : 10));
 		}, { passive: false });
 
 		// ─ キーボードショートカット ────────────────────────────
