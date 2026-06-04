@@ -682,15 +682,15 @@
 
 	<div id="lyricContextMenu" class="context-menu" style="display:none">
 		<button class="ctx-item" id="ctxSplit">カーソルで分割 [S]</button>
-		<button class="ctx-item" id="ctxSnapGroup">グループに合わせる</button>
+		<button class="ctx-item" id="ctxSnapGroup">グループに合わせる [Q]</button>
 		<div class="ctx-sep"></div>
 		<button class="ctx-item" id="ctxMerge">結合 [G]</button>
-		<button class="ctx-item" id="ctxFillGaps">間を詰める</button>
+		<button class="ctx-item" id="ctxFillGaps">間を詰める [F]</button>
 		<div class="ctx-sep" id="ctxMergeSep"></div>
-		<button class="ctx-item" id="ctxShiftLeft">左にシフト</button>
-		<button class="ctx-item" id="ctxShiftLeftAdd">左に追加してシフト</button>
-		<button class="ctx-item" id="ctxShiftRight">右にシフト</button>
-		<button class="ctx-item" id="ctxShiftRightAdd">右に追加してシフト</button>
+		<button class="ctx-item" id="ctxShiftLeft">左にシフト [Shift+←]</button>
+		<button class="ctx-item" id="ctxShiftLeftAdd">左に追加してシフト [Shift+Ctrl+←]</button>
+		<button class="ctx-item" id="ctxShiftRight">右にシフト [Shift+→]</button>
+		<button class="ctx-item" id="ctxShiftRightAdd">右に追加してシフト [Shift+Ctrl+→]</button>
 		<div class="ctx-sep"></div>
 		<button class="ctx-item ctx-danger" id="ctxDelete">削除</button>
 	</div>
@@ -1738,17 +1738,19 @@
 			selected.sort((a, b) => a.startSec - b.startSec);
 			// 元テキストを保存してから書き換え（連鎖書き換えで元値が失われないよう）
 			const origText = new Map(selected.map(b => [b, b.text]));
+			const newSelection = new Set();
 
 			if (direction === 'left') {
 				// 左→右の順に処理。addModeの追加対象は最左ブロック
 				const addBlock = addMode ? selected[0] : null;
 				for (const block of selected) {
 					const idx = lyricBlocks.indexOf(block);
-					if (idx <= 0) continue; // 左隣なし → スキップ
+					if (idx <= 0) { newSelection.add(block); continue; } // 左隣なし → 選択維持
 					const dest = lyricBlocks[idx - 1];
 					const src  = origText.get(block);
 					dest.text  = (addMode && block === addBlock) ? dest.text + src : src;
 					block.text = '';
+					newSelection.add(dest);
 				}
 			} else {
 				// 右→左の順に処理。addModeの追加対象は最右ブロック
@@ -1756,12 +1758,22 @@
 				for (let i = selected.length - 1; i >= 0; i--) {
 					const block = selected[i];
 					const idx = lyricBlocks.indexOf(block);
-					if (idx >= lyricBlocks.length - 1) continue; // 右隣なし → スキップ
+					if (idx >= lyricBlocks.length - 1) { newSelection.add(block); continue; } // 右隣なし → 選択維持
 					const dest = lyricBlocks[idx + 1];
 					const src  = origText.get(block);
 					dest.text  = (addMode && block === addBlock) ? src + dest.text : src;
 					block.text = '';
+					newSelection.add(dest);
 				}
+			}
+
+			// 選択範囲をシフト後のブロックに移動
+			selectedBlocks.clear();
+			newSelection.forEach(b => selectedBlocks.add(b));
+			if (anchorBlock) {
+				const anchorIdx = lyricBlocks.indexOf(anchorBlock);
+				if (direction === 'left' && anchorIdx > 0) anchorBlock = lyricBlocks[anchorIdx - 1];
+				else if (direction === 'right' && anchorIdx < lyricBlocks.length - 1) anchorBlock = lyricBlocks[anchorIdx + 1];
 			}
 			render();
 		}
@@ -1876,6 +1888,19 @@
 			render();
 		}
 
+		// ─ Ctrl+ホイール: ズーム ──────────────────────────────
+		document.getElementById('rollScroll').addEventListener('wheel', (e) => {
+			if (!e.ctrlKey) return;
+			e.preventDefault();
+			const delta = e.deltaY > 0 ? -10 : 10;
+			const newZoom = Math.max(30, Math.min(400, zoomPxPerSec + delta));
+			if (newZoom === zoomPxPerSec) return;
+			zoomPxPerSec = newZoom;
+			document.getElementById('zoomSlider').value = zoomPxPerSec;
+			document.getElementById('zoomValue').textContent = zoomPxPerSec + ' px/s';
+			render();
+		}, { passive: false });
+
 		// ─ キーボードショートカット ────────────────────────────
 		document.addEventListener('keydown', (e) => {
 			const tag = document.activeElement?.tagName;
@@ -1895,6 +1920,25 @@
 				splitBlockAtCursor();
 			} else if (e.key === 'g' || e.key === 'G') {
 				mergeBlocks();
+			} else if (e.key === 'f' || e.key === 'F') {
+				fillGaps();
+			} else if (e.key === 'q' || e.key === 'Q') {
+				selectedBlocks.forEach(b => snapBlockToGroup(b));
+				render();
+			} else if (e.key === 'F2') {
+				e.preventDefault();
+				if (selectedBlocks.size > 0) {
+					const target = anchorBlock && selectedBlocks.has(anchorBlock)
+						? anchorBlock
+						: [...selectedBlocks][0];
+					startEditBlock(target);
+				}
+			} else if (e.key === 'ArrowLeft' && e.shiftKey) {
+				e.preventDefault();
+				shiftLyrics('left', e.ctrlKey);
+			} else if (e.key === 'ArrowRight' && e.shiftKey) {
+				e.preventDefault();
+				shiftLyrics('right', e.ctrlKey);
 			}
 		});
 
