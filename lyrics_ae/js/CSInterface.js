@@ -31,3 +31,36 @@ CSInterface.prototype.resizeContent = function (width, height) {
 		window.__adobe_cep__.resizeContent(width, height);
 	}
 };
+
+// Extension 間通信用イベント
+function CSEvent(type, scope, appId, extensionId) {
+	this.type = type;
+	this.scope = scope;
+	this.appId = appId;
+	this.extensionId = extensionId;
+	this.data = "";
+}
+
+// 別の Extension（パネル）を開く
+CSInterface.prototype.requestOpenExtension = function (extensionId, params) {
+	if (typeof window.__adobe_cep__ !== "undefined") {
+		window.__adobe_cep__.requestOpenExtension(extensionId, params);
+	}
+};
+
+// イベントを送出する
+CSInterface.prototype.dispatchEvent = function (event) {
+	if (typeof event.data == "object") {
+		event.data = JSON.stringify(event.data);
+	}
+	if (typeof window.__adobe_cep__ !== "undefined") {
+		window.__adobe_cep__.dispatchEvent(event);
+	}
+};
+
+// 自身の Extension を閉じる
+CSInterface.prototype.closeExtension = function () {
+	if (typeof window.__adobe_cep__ !== "undefined") {
+		window.__adobe_cep__.closeExtension();
+	}
+};
