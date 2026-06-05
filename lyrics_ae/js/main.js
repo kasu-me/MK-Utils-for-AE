@@ -10,27 +10,22 @@ csInterface.addEventListener(CSInterface.THEME_COLOR_CHANGED_EVENT, updateTheme)
 
 // Lyrics Mapper を CEP の別ウィンドウとして開く
 document.getElementById('btn-open-mapper').addEventListener('click', function () {
-	var beforeId = readTransferId();
+	deleteTransfer(); // 前回の残骸が残っていれば消してから開く
 	csInterface.requestOpenExtension(MAPPER_EXTENSION_ID, '');
 	// ModalDialog が閉じた後（＝ここに制御が戻った時）に受け渡しファイルを読む。
 	// 非同期で戻る環境に備え、短時間だけポーリングのフォールバックも行う。
-	pollTransfer(beforeId, 0);
+	pollTransfer(0);
 });
 
-// 受け渡しファイルから取り込み済み判定用の id を取得
-function readTransferId() {
-	if (!window.cep || !window.cep.fs) return null;
-	var r = window.cep.fs.readFile(TRANSFER_PATH);
-	if (r.err !== 0) return null;
-	try {
-		return JSON.parse(r.data).id;
-	} catch (e) {
-		return null;
+// 受け渡しファイルを削除する
+function deleteTransfer() {
+	if (window.cep && window.cep.fs) {
+		window.cep.fs.deleteFile(TRANSFER_PATH);
 	}
 }
 
-// 受け渡しファイルを監視し、新しい送信があれば取り込む
-function pollTransfer(beforeId, tries) {
+// 受け渡しファイルを監視し、送信があれば取り込んでファイルを削除する
+function pollTransfer(tries) {
 	if (!window.cep || !window.cep.fs) {
 		showStatus('エラー: ファイルIO APIが利用できません', true);
 		return;
@@ -41,14 +36,15 @@ function pollTransfer(beforeId, tries) {
 		try {
 			payload = JSON.parse(r.data);
 		} catch (e) { payload = null; }
-		if (payload && payload.id !== beforeId && validateBlocks(payload.blocks)) {
+		if (payload && validateBlocks(payload.blocks)) {
 			setLyricsData(payload.blocks);
 			showStatus('Lyrics Mapperからデータを取り込みました');
+			deleteTransfer(); // 用済みなので削除
 			return;
 		}
 	}
 	if (tries < 40) { // 最大約20秒間フォールバック監視
-		setTimeout(function () { pollTransfer(beforeId, tries + 1); }, 500);
+		setTimeout(function () { pollTransfer(tries + 1); }, 500);
 	}
 }
 
