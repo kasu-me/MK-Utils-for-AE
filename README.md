@@ -100,7 +100,18 @@ After Effects 2026向けの動画制作支援ツール群です。以下の4つ�
 
 ## Lyrics Mapper
 
-MusicXMLファイルを読み込み、ピアノロール上で歌詞ブロックを編集して、After Effects用のJSONファイルをエクスポートするブラウザツールです。インストール不要で、`lyrics-mapper/index.html` をブラウザで開くだけで使用できます。
+MusicXMLファイルを読み込み、ピアノロール上で歌詞ブロックを編集して、After Effects用のJSONファイルをエクスポートするブラウザツールです。
+
+> **2種類のバリアントについて**
+>
+> このリポジトリには `lyrics-mapper/` と `lyrics_ae/lyrics-mapper/` の2箇所に `index.html` が存在します。
+>
+> | パス | 用途 | 起動方法 |
+> |------|------|----------|
+> | `lyrics-mapper/index.html` | **スタンドアロン版**。ブラウザ単体で動作します。JSONはファイルとしてダウンロードし、後から Lyrics AE パネルで読み込みます。 | ブラウザで直接開く |
+> | `lyrics_ae/lyrics-mapper/index.html` | **AE連携版**。Lyrics AE パネル内のボタンから呼び出されます。編集完了後に「AEに送信」ボタンを押すと、CEP拡張機能の内部ファイル経由でデータを Lyrics AE パネルへ直接渡してウィンドウを閉じます。 | Lyrics AE パネルから起動 |
+>
+> 機能（MusicXML読み込み・ブロック編集・エクスポートなど）はどちらも同一です。
 
 ### 機能
 

@@ -117,6 +117,19 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 }
 ```
 
+## lyrics-mapper Variants
+
+There are **two copies** of `lyrics-mapper/index.html` in this repo, serving different contexts:
+
+| Path | Purpose | How launched |
+|------|---------|--------------|
+| `lyrics-mapper/index.html` | **Standalone** — runs in any browser, no CEP context. Exports JSON as a file download for later import via Lyrics AE. | Open directly in browser |
+| `lyrics_ae/lyrics-mapper/index.html` | **AE-integrated** — launched from a button inside the Lyrics AE CEP panel. The "AEに送信" button writes data to `lyrics_ae/lyrics_transfer.json` via `window.cep.fs`, then calls `CSInterface.closeExtension()` to hand off to the panel. | Launched by Lyrics AE panel |
+
+The editing feature set is identical between the two. The only difference is the AE-integrated version has a "AEに送信" (Send to AE) button in place of the standalone download button, and depends on `CSInterface.js` and the CEP `window.cep.fs` API.
+
+When editing shared logic, apply changes to **both** files.
+
 ## lyrics_ae Specifics
 
 **[lyrics_ae/](lyrics_ae/)** is a CEP extension panel that imports lyrics JSON (produced by `lyrics-mapper`) into After Effects. Extension ID: `com.example.lyrics.panel`.
