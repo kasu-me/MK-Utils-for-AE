@@ -575,6 +575,8 @@
 	<header>
 		<h1>Lyrics Mapper</h1>
 		<span class="spacer"></span>
+		<button class="theme-btn" id="undoBtn" title="Ctrl+Z" disabled>元に戻す</button>
+		<button class="theme-btn" id="redoBtn" title="Ctrl+Y" disabled>やり直し</button>
 		<button class="theme-btn" id="themeToggle"></button>
 	</header>
 
@@ -734,6 +736,53 @@
 		let selectedBlocks = new Set(); // Ctrl+クリックで複数選択中のブロック
 		let anchorBlock = null;      // Shift+クリック範囲選択の起点
 		let cursorSec = null;      // 縦カーソル位置（秒）、null=非表示
+
+		// ═══════════════════════════════════════════════════════
+		//  Undo/Redo
+		// ═══════════════════════════════════════════════════════
+		const MAX_HISTORY = 50;
+		let undoStack = [];
+		let redoStack = [];
+		let preDragSnapshot = null;
+
+		function cloneBlocks() {
+			return lyricBlocks.map(b => ({ ...b }));
+		}
+
+		function pushHistory() {
+			undoStack.push(cloneBlocks());
+			if (undoStack.length > MAX_HISTORY) undoStack.shift();
+			redoStack = [];
+			updateUndoRedoUI();
+		}
+
+		function undo() {
+			if (undoStack.length === 0) return;
+			redoStack.push(cloneBlocks());
+			lyricBlocks = undoStack.pop();
+			selectedBlocks.clear();
+			anchorBlock = null;
+			render();
+			updateUndoRedoUI();
+		}
+
+		function redo() {
+			if (redoStack.length === 0) return;
+			undoStack.push(cloneBlocks());
+			lyricBlocks = redoStack.pop();
+			selectedBlocks.clear();
+			anchorBlock = null;
+			render();
+			updateUndoRedoUI();
+		}
+
+		function updateUndoRedoUI() {
+			document.getElementById('undoBtn').disabled = undoStack.length === 0;
+			document.getElementById('redoBtn').disabled = redoStack.length === 0;
+		}
+
+		document.getElementById('undoBtn').addEventListener('click', undo);
+		document.getElementById('redoBtn').addEventListener('click', redo);
 
 		// ═══════════════════════════════════════════════════════
 		//  テーマ
@@ -1258,6 +1307,9 @@
 			lyricBlocks = groups.map(g => ({ startSec: g.startSec, endSec: g.endSec, text: '' }));
 			selectedBlocks.clear();
 			anchorBlock = null;
+			undoStack = [];
+			redoStack = [];
+			updateUndoRedoUI();
 		}
 
 		function getLyricYOffset() {
@@ -1356,6 +1408,7 @@
 				try {
 					const data = JSON.parse(ev.target.result);
 					if (!Array.isArray(data)) throw new Error('配列形式のJSONではありません');
+					pushHistory();
 					lyricBlocks = data.map((b, i) => {
 						if (typeof b.startSec !== 'number' || typeof b.endSec !== 'number')
 							throw new Error(`[${i}] startSec / endSec が数値ではありません`);
@@ -1410,6 +1463,7 @@
 
 			if (chunks.length === 0) return;
 
+			pushHistory();
 			// 現在の lyricBlocks の状態を保持したまま先頭からチャンクを割り当てる
 			const count = Math.min(chunks.length, lyricBlocks.length);
 			for (let i = 0; i < count; i++) lyricBlocks[i].text = chunks[i];
@@ -1435,6 +1489,7 @@
 				el.addEventListener('click', () => {
 					const emptyBlock = lyricBlocks.find(b => !b.text);
 					if (emptyBlock) {
+						pushHistory();
 						emptyBlock.text = chunk;
 						pendingChunks.splice(i, 1);
 						updatePendingArea();
@@ -1455,6 +1510,7 @@
 			if (!score || e.button !== 0) return;
 			e.preventDefault();
 			rollCanvas.focus();
+			preDragSnapshot = cloneBlocks();
 
 			const t = e.offsetX / zoomPxPerSec;
 
@@ -1624,6 +1680,7 @@
 		});
 
 		document.getElementById('ctxSnapGroup').addEventListener('click', () => {
+			pushHistory();
 			selectedBlocks.forEach(b => snapBlockToGroup(b));
 			render();
 			document.getElementById('lyricContextMenu').style.display = 'none';
@@ -1658,6 +1715,7 @@
 
 		document.getElementById('ctxDelete').addEventListener('click', () => {
 			if (selectedBlocks.size > 0) {
+				pushHistory();
 				lyricBlocks = lyricBlocks.filter(b => !selectedBlocks.has(b));
 				selectedBlocks.clear();
 				render();
@@ -1748,7 +1806,13 @@
 					lyricBlocks.filter(b => b.startSec < hi && b.endSec > lo)
 						.forEach(b => selectedBlocks.add(b));
 				}
+			} else if (hasDragged && preDragSnapshot !== null) {
+				undoStack.push(preDragSnapshot);
+				if (undoStack.length > MAX_HISTORY) undoStack.shift();
+				redoStack = [];
+				updateUndoRedoUI();
 			}
+			preDragSnapshot = null;
 
 			dragState = null;
 			document.body.style.cursor = '';
@@ -1765,6 +1829,7 @@
 				startEditBlock(block);
 			} else {
 				// 空きエリアのダブルクリック: ブロックを生成して選択
+				pushHistory();
 				const newBlock = createBlockAtPosition(t);
 				selectedBlocks.clear();
 				selectedBlocks.add(newBlock);
@@ -1775,6 +1840,7 @@
 
 		function shiftLyrics(direction, addMode) {
 			if (!score || selectedBlocks.size === 0) return;
+			pushHistory();
 			const selected = lyricBlocks.filter(b => selectedBlocks.has(b));
 			selected.sort((a, b) => a.startSec - b.startSec);
 			// 元テキストを保存してから書き換え（連鎖書き換えで元値が失われないよう）
@@ -1861,6 +1927,7 @@
 
 		function fillGaps() {
 			if (selectedBlocks.size < 2) return;
+			pushHistory();
 			const blocks = lyricBlocks.filter(b => selectedBlocks.has(b));
 			blocks.sort((a, b) => a.startSec - b.startSec);
 			for (let i = 0; i < blocks.length - 1; i++) {
@@ -1873,6 +1940,7 @@
 
 		function mergeBlocks() {
 			if (selectedBlocks.size < 2) return;
+			pushHistory();
 			const blocks = lyricBlocks.filter(b => selectedBlocks.has(b));
 			blocks.sort((a, b) => a.startSec - b.startSec);
 			const merged = {
@@ -1893,6 +1961,7 @@
 			if (cursorSec === null) return;
 			const idx = lyricBlocks.findIndex(b => cursorSec > b.startSec && cursorSec < b.endSec);
 			if (idx === -1) return;
+			pushHistory();
 			const block = lyricBlocks[idx];
 			const right = { startSec: cursorSec, endSec: block.endSec, text: '' };
 			block.endSec = cursorSec;
@@ -1923,7 +1992,9 @@
 
 		function commitEdit() {
 			if (!editingBlock) return;
-			editingBlock.text = document.getElementById('lyricInput').value;
+			const newText = document.getElementById('lyricInput').value;
+			if (newText !== editingBlock.text) pushHistory();
+			editingBlock.text = newText;
 			editingBlock = null;
 			document.getElementById('lyricInput').style.display = 'none';
 			render();
@@ -1940,13 +2011,20 @@
 		document.addEventListener('keydown', (e) => {
 			const tag = document.activeElement?.tagName;
 			if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-			if (e.key === 'a' && e.ctrlKey) {
+			if (e.key === 'z' && e.ctrlKey && !e.shiftKey) {
+				e.preventDefault();
+				undo();
+			} else if ((e.key === 'y' && e.ctrlKey) || (e.key === 'Z' && e.ctrlKey)) {
+				e.preventDefault();
+				redo();
+			} else if (e.key === 'a' && e.ctrlKey) {
 				e.preventDefault();
 				lyricBlocks.forEach(b => selectedBlocks.add(b));
 				if (lyricBlocks.length > 0) anchorBlock = lyricBlocks[0];
 				render();
 			} else if (e.key === 'Delete') {
 				if (selectedBlocks.size === 0) return;
+				pushHistory();
 				lyricBlocks = lyricBlocks.filter(b => !selectedBlocks.has(b));
 				selectedBlocks.clear();
 				anchorBlock = null;
@@ -1958,6 +2036,7 @@
 			} else if (e.key === 'f' || e.key === 'F') {
 				fillGaps();
 			} else if (e.key === 'q' || e.key === 'Q') {
+				pushHistory();
 				selectedBlocks.forEach(b => snapBlockToGroup(b));
 				render();
 			} else if (e.key === 'F2') {
