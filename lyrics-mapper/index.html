@@ -1356,13 +1356,35 @@
 		document.getElementById('copyBtn').addEventListener('click', async () => {
 			const data = getExportData();
 			const json = JSON.stringify(data, null, 2);
-			try {
-				await navigator.clipboard.writeText(json);
-				showExportStatus(`クリップボードにコピーしました（${data.length} ブロック）`);
-			} catch {
-				showExportStatus('クリップボードへのアクセスが拒否されました');
+			let ok;
+			if (window.cep || !navigator.clipboard) {
+				// CEP（file://オリジン）では navigator.clipboard が権限拒否されるため execCommand を使う
+				ok = copyViaExecCommand(json);
+			} else {
+				try {
+					await navigator.clipboard.writeText(json);
+					ok = true;
+				} catch {
+					ok = copyViaExecCommand(json);
+				}
 			}
+			showExportStatus(ok
+				? `クリップボードにコピーしました（${data.length} ブロック）`
+				: 'クリップボードへのアクセスが拒否されました');
 		});
+
+		function copyViaExecCommand(text) {
+			const ta = document.createElement('textarea');
+			ta.value = text;
+			ta.style.position = 'fixed';
+			ta.style.opacity = '0';
+			document.body.appendChild(ta);
+			ta.select();
+			let ok = false;
+			try { ok = document.execCommand('copy'); } catch { ok = false; }
+			ta.remove();
+			return ok;
+		}
 
 		document.getElementById('importJsonBtn').addEventListener('click', () => {
 			document.getElementById('jsonFileInput').click();
