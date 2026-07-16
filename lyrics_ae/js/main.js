@@ -2,18 +2,25 @@ var csInterface = new CSInterface();
 var g_lyricsBlocks = null;
 
 var MAPPER_EXTENSION_ID = 'com.example.lyrics.mapper';
+// Mapper が受け渡しファイルの書き込み完了時に発火するイベント
+var TRANSFER_EVENT = 'com.example.lyrics.transferReady';
 // 両パネルが共有する受け渡しファイル（同じ拡張フォルダ直下）
 var TRANSFER_PATH = urlToFsPath(window.location.href.replace(/[^\/]*$/, '') + 'lyrics_transfer.json');
 
 updateTheme();
 csInterface.addEventListener(CSInterface.THEME_COLOR_CHANGED_EVENT, updateTheme);
 
+// Mapper の「AEに送信」で発火するイベントを常時リッスンし、受け渡しファイルを取り込む
+csInterface.addEventListener(TRANSFER_EVENT, function () {
+	readTransfer();
+});
+
 // Lyrics Mapper を CEP の別ウィンドウとして開く
 document.getElementById('btn-open-mapper').addEventListener('click', function () {
 	deleteTransfer(); // 前回の残骸が残っていれば消してから開く
 	csInterface.requestOpenExtension(MAPPER_EXTENSION_ID, '');
-	// ModalDialog が閉じた後（＝ここに制御が戻った時）に受け渡しファイルを読む。
-	// 非同期で戻る環境に備え、短時間だけポーリングのフォールバックも行う。
+	// 取り込みは TRANSFER_EVENT の受信で行う。イベントが届かない環境に備え、
+	// 短時間だけポーリングのフォールバックも行う。
 	pollTransfer(0);
 });
 
@@ -24,25 +31,28 @@ function deleteTransfer() {
 	}
 }
 
-// 受け渡しファイルを監視し、送信があれば取り込んでファイルを削除する
-function pollTransfer(tries) {
+// 受け渡しファイルを読み、有効なら取り込んでファイルを削除する
+function readTransfer() {
 	if (!window.cep || !window.cep.fs) {
 		showStatus('エラー: ファイルIO APIが利用できません', true);
-		return;
+		return false;
 	}
 	var r = window.cep.fs.readFile(TRANSFER_PATH);
-	if (r.err === 0) {
-		var payload = null;
-		try {
-			payload = JSON.parse(r.data);
-		} catch (e) { payload = null; }
-		if (payload && validateBlocks(payload.blocks)) {
-			setLyricsData(payload.blocks);
-			showStatus('Lyrics Mapperからデータを取り込みました');
-			deleteTransfer(); // 用済みなので削除
-			return;
-		}
-	}
+	if (r.err !== 0) return false;
+	var payload = null;
+	try {
+		payload = JSON.parse(r.data);
+	} catch (e) { payload = null; }
+	if (!payload || !validateBlocks(payload.blocks)) return false;
+	setLyricsData(payload.blocks);
+	showStatus('Lyrics Mapperからデータを取り込みました');
+	deleteTransfer(); // 用済みなので削除
+	return true;
+}
+
+// イベントが届かない環境向けのフォールバック: 受け渡しファイルを短時間だけ監視する
+function pollTransfer(tries) {
+	if (readTransfer()) return;
 	if (tries < 40) { // 最大約20秒間フォールバック監視
 		setTimeout(function () { pollTransfer(tries + 1); }, 500);
 	}

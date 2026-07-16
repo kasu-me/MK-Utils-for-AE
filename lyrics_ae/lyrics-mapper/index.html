@@ -1391,7 +1391,12 @@
 				showExportStatus('保存に失敗しました (err=' + r.err + ')');
 				return;
 			}
+			// パネル側へ「書き込み完了」を通知してから閉じる
 			const cs = new CSInterface();
+			const env = cs.getHostEnvironment();
+			const ev = new CSEvent('com.example.lyrics.transferReady', 'APPLICATION',
+				env ? env.appId : '', 'com.example.lyrics.mapper');
+			cs.dispatchEvent(ev);
 			setTimeout(() => cs.closeExtension(), 100);
 		});
 

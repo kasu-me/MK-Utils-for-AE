@@ -124,7 +124,7 @@ There are **two copies** of `lyrics-mapper/index.html` in this repo, serving dif
 | Path | Purpose | How launched |
 |------|---------|--------------|
 | `lyrics-mapper/index.html` | **Standalone** — runs in any browser, no CEP context. Exports JSON as a file download for later import via Lyrics AE. | Open directly in browser |
-| `lyrics_ae/lyrics-mapper/index.html` | **AE-integrated** — launched from a button inside the Lyrics AE CEP panel. The "AEに送信" button writes data to `lyrics_ae/lyrics_transfer.json` via `window.cep.fs`, then calls `CSInterface.closeExtension()` to hand off to the panel. | Launched by Lyrics AE panel |
+| `lyrics_ae/lyrics-mapper/index.html` | **AE-integrated** — launched from a button inside the Lyrics AE CEP panel. The "AEに送信" button writes data to `lyrics_ae/lyrics_transfer.json` via `window.cep.fs`, dispatches the CEP event `com.example.lyrics.transferReady` (which the panel listens for to pick up the file), then calls `CSInterface.closeExtension()`. The panel also runs a short file-polling fallback right after launching the mapper. | Launched by Lyrics AE panel |
 
 The editing feature set is identical between the two. The only difference is the AE-integrated version has a "AEに送信" (Send to AE) button in place of the standalone download button, and depends on `CSInterface.js` and the CEP `window.cep.fs` API.
 
