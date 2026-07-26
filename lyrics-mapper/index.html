@@ -594,9 +594,15 @@
 		<!-- コントロール -->
 		<div class="controls" id="controls" style="display:none">
 			<div class="ctrl-group">
-				<span class="ctrl-label">ズーム</span>
+				<span class="ctrl-label">横ズーム</span>
 				<input type="range" id="zoomSlider" min="30" max="400" step="10" value="100">
 				<span class="ctrl-value" id="zoomValue">100 px/s</span>
+			</div>
+			<div class="ctrl-divider"></div>
+			<div class="ctrl-group">
+				<span class="ctrl-label">縦ズーム</span>
+				<input type="range" id="vzoomSlider" min="8" max="32" step="1" value="18">
+				<span class="ctrl-value" id="vzoomValue">18 px</span>
 			</div>
 			<div class="ctrl-divider"></div>
 			<div class="ctrl-group">
@@ -705,7 +711,8 @@
 		// ═══════════════════════════════════════════════════════
 		const KEY_W = 52;   // ピアノキー列幅 (px)
 		const TIME_H = 26;   // 時間軸高さ (px)
-		const NOTE_H = 18;   // 1半音あたりの高さ (px)
+		const NOTE_H_MIN = 8;   // 1半音あたりの高さ 最小値 (px)
+		const NOTE_H_MAX = 32;   // 1半音あたりの高さ 最大値 (px)
 		const ROLL_PAD_SEC = 0.5;  // ロール末尾余白 (秒)
 		const NOTE_RANGE_PAD = 2;   // 音域の上下パディング (半音)
 		const LYRIC_H = 40;  // 歌詞トラック高さ (px)
@@ -724,6 +731,7 @@
 		// ═══════════════════════════════════════════════════════
 		let score = null;
 		let zoomPxPerSec = 100;
+		let noteH = 18;   // 1半音あたりの高さ (px、縦ズームで可変)
 		let threshIdx = 1;   // デフォルト: 1/16音符
 		let lyricBlocks = [];  // { startSec, endSec, text }
 		let pendingChunks = []; // 未割り当てチャンク
@@ -1004,7 +1012,7 @@
 			};
 
 			const { min: minMidi, max: maxMidi } = computeNoteRange();
-			const canvasH = TIME_H + (maxMidi - minMidi + 1) * NOTE_H + LYRIC_H;
+			const canvasH = TIME_H + (maxMidi - minMidi + 1) * noteH + LYRIC_H;
 			const canvasW = Math.ceil((score.totalDurationSec + ROLL_PAD_SEC) * zoomPxPerSec);
 			const groups = detectGroups(score.notes, getThresholdSec());
 
@@ -1052,17 +1060,17 @@
 
 				if (BLACK_SEMITONES.has(semi)) {
 					ctx.fillStyle = 'rgba(0,0,0,0.09)';
-					ctx.fillRect(0, y, KEY_W - 1, NOTE_H);
+					ctx.fillRect(0, y, KEY_W - 1, noteH);
 				}
 
 				ctx.strokeStyle = C.border; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.5;
-				ctx.beginPath(); ctx.moveTo(0, y + NOTE_H - 0.5); ctx.lineTo(KEY_W, y + NOTE_H - 0.5); ctx.stroke();
+				ctx.beginPath(); ctx.moveTo(0, y + noteH - 0.5); ctx.lineTo(KEY_W, y + noteH - 0.5); ctx.stroke();
 				ctx.globalAlpha = 1;
 
 				// C音にラベル
 				if (semi === 0) {
 					ctx.fillStyle = C.textMuted;
-					ctx.fillText('C' + (Math.floor(midi / 12) - 1), KEY_W - 5, y + NOTE_H / 2);
+					ctx.fillText('C' + (Math.floor(midi / 12) - 1), KEY_W - 5, y + noteH / 2);
 				}
 			}
 
@@ -1098,10 +1106,10 @@
 				const y = midiToY(midi, maxMidi);
 				if (BLACK_SEMITONES.has(midi % 12)) {
 					ctx.fillStyle = 'rgba(0,0,0,0.04)';
-					ctx.fillRect(0, y, cW, NOTE_H);
+					ctx.fillRect(0, y, cW, noteH);
 				}
 				ctx.strokeStyle = C.border; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.35;
-				ctx.beginPath(); ctx.moveTo(0, y + NOTE_H - 0.5); ctx.lineTo(cW, y + NOTE_H - 0.5); ctx.stroke();
+				ctx.beginPath(); ctx.moveTo(0, y + noteH - 0.5); ctx.lineTo(cW, y + noteH - 0.5); ctx.stroke();
 				ctx.globalAlpha = 1;
 			}
 
@@ -1160,7 +1168,7 @@
 					const x = n.startSec * zoomPxPerSec;
 					const y = midiToY(n.pitch.midi, maxMidi);
 					const nw = Math.max(n.durationSec * zoomPxPerSec - 1, 2);
-					const nh = NOTE_H - 2;
+					const nh = noteH - 2;
 
 					roundRect(ctx, x, y + 1, nw, nh, 2);
 					ctx.fillStyle = C.noteFill;
@@ -1169,7 +1177,7 @@
 					if (n.lyric && nw > 10) {
 						ctx.fillStyle = '#ffffff';
 						ctx.textAlign = 'left';
-						ctx.fillText(n.lyric, x + 3, y + NOTE_H / 2);
+						ctx.fillText(n.lyric, x + 3, y + noteH / 2);
 					}
 				});
 
@@ -1289,6 +1297,19 @@
 			applyZoom(parseInt(e.target.value, 10));
 		});
 
+		function applyVZoom(newNoteH) {
+			newNoteH = Math.max(NOTE_H_MIN, Math.min(NOTE_H_MAX, newNoteH));
+			if (newNoteH === noteH) return;
+			noteH = newNoteH;
+			document.getElementById('vzoomSlider').value = noteH;
+			document.getElementById('vzoomValue').textContent = noteH + ' px';
+			render();
+		}
+
+		document.getElementById('vzoomSlider').addEventListener('input', (e) => {
+			applyVZoom(parseInt(e.target.value, 10));
+		});
+
 		document.getElementById('threshSlider').addEventListener('input', (e) => {
 			threshIdx = parseInt(e.target.value, 10);
 			updateThresholdDisplay();
@@ -1313,7 +1334,7 @@
 		function getLyricYOffset() {
 			if (!score) return 0;
 			const { min: minMidi, max: maxMidi } = computeNoteRange();
-			return TIME_H + (maxMidi - minMidi + 1) * NOTE_H;
+			return TIME_H + (maxMidi - minMidi + 1) * noteH;
 		}
 
 		function updateThresholdDisplay() {
@@ -1514,7 +1535,7 @@
 					const nx1 = n.startSec * zoomPxPerSec;
 					const nx2 = (n.startSec + n.durationSec) * zoomPxPerSec;
 					const ny = midiToY(n.pitch.midi, maxMidi);
-					return e.offsetX >= nx1 && e.offsetX <= nx2 && e.offsetY >= ny && e.offsetY < ny + NOTE_H;
+					return e.offsetX >= nx1 && e.offsetX <= nx2 && e.offsetY >= ny && e.offsetY < ny + noteH;
 				});
 				cursorSec = hitNote ? hitNote.startSec : t;
 				render();
@@ -1616,7 +1637,7 @@
 					const nx1 = n.startSec * zoomPxPerSec;
 					const nx2 = (n.startSec + n.durationSec) * zoomPxPerSec;
 					const ny = midiToY(n.pitch.midi, maxMidi);
-					return e.offsetX >= nx1 && e.offsetX <= nx2 && e.offsetY >= ny && e.offsetY < ny + NOTE_H;
+					return e.offsetX >= nx1 && e.offsetX <= nx2 && e.offsetY >= ny && e.offsetY < ny + noteH;
 				});
 				rollCanvas.style.cursor = onNote ? 'pointer' : 'crosshair';
 			} else {
@@ -1845,8 +1866,8 @@
 					const idx = lyricBlocks.indexOf(block);
 					if (idx <= 0) { newSelection.add(block); continue; } // 左隣なし → 選択維持
 					const dest = lyricBlocks[idx - 1];
-					const src  = origText.get(block);
-					dest.text  = (addMode && block === addBlock) ? dest.text + src : src;
+					const src = origText.get(block);
+					dest.text = (addMode && block === addBlock) ? dest.text + src : src;
 					block.text = '';
 					newSelection.add(dest);
 				}
@@ -1858,8 +1879,8 @@
 					const idx = lyricBlocks.indexOf(block);
 					if (idx >= lyricBlocks.length - 1) { newSelection.add(block); continue; } // 右隣なし → 選択維持
 					const dest = lyricBlocks[idx + 1];
-					const src  = origText.get(block);
-					dest.text  = (addMode && block === addBlock) ? src + dest.text : src;
+					const src = origText.get(block);
+					dest.text = (addMode && block === addBlock) ? src + dest.text : src;
 					block.text = '';
 					newSelection.add(dest);
 				}
@@ -1894,7 +1915,7 @@
 			}
 			if (!best) return;
 			block.startSec = best.startSec;
-			block.endSec   = best.endSec;
+			block.endSec = best.endSec;
 		}
 
 		function createBlockAtPosition(t) {
@@ -1903,12 +1924,12 @@
 			let startSec, endSec;
 			if (group) {
 				startSec = group.startSec;
-				endSec   = group.endSec;
+				endSec = group.endSec;
 			} else {
 				const secPerMeasure = (60 / (score.tempoMap[0]?.tempo ?? 120)) * 4;
 				const measureIdx = Math.floor(t / secPerMeasure);
 				startSec = measureIdx * secPerMeasure;
-				endSec   = (measureIdx + 1) * secPerMeasure;
+				endSec = (measureIdx + 1) * secPerMeasure;
 			}
 			const newBlock = { startSec, endSec, text: '' };
 			lyricBlocks.push(newBlock);
@@ -2074,7 +2095,7 @@
 		}
 
 		function midiToY(midi, maxMidi) {
-			return TIME_H + (maxMidi - midi) * NOTE_H;
+			return TIME_H + (maxMidi - midi) * noteH;
 		}
 
 		function fmtTime(sec) {
