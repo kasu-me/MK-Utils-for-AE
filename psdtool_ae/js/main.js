@@ -99,7 +99,9 @@ function moveKeyframesToCurrentTime() {
 }
 function removeKeyframesAtCurrentTime(e) {
 	var isShift = e && e.shiftKey ? true : false;
-	var msg = isShift ? "現在の時間以降すべてのキーフレームを全階層から削除しますか？" : "現在の時間にあるキーフレームを全階層から削除しますか？";
+	var isSelectedOnly = e && (e.ctrlKey || e.metaKey) ? true : false;
+	var target = isSelectedOnly ? "選択したレイヤー" : "全階層";
+	var msg = isShift ? "現在の時間以降すべてのキーフレームを" + target + "から削除しますか？" : "現在の時間にあるキーフレームを" + target + "から削除しますか？";
 	if (!confirm(msg)) {
 		return;
 	}
@@ -109,7 +111,7 @@ function removeKeyframesAtCurrentTime(e) {
 	statusDiv.style.color = "#eeeeee";
 	statusDiv.style.fontWeight = "normal";
 
-	csInterface.evalScript('removeKeyframesAtCurrentTime(' + isShift + ')', function (res) {
+	csInterface.evalScript('removeKeyframesAtCurrentTime(' + isShift + ', ' + isSelectedOnly + ')', function (res) {
 		var resultObj = { count: 0, status: "false" };
 		try {
 			if (res.startsWith("{")) {

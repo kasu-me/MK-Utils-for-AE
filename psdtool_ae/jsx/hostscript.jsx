@@ -384,18 +384,33 @@ function applyKeyframeData(prop, data) {
 	prop.setTemporalAutoBezierAtKey(newKeyIndex, data.tempAuto);
 }
 
-function removeKeyframesAtCurrentTime(isShift) {
+function removeKeyframesAtCurrentTime(isShift, isSelectedOnly) {
 	var undoName = "Remove Keyframes at Current Time";
 	var comp = app.project.activeItem;
 	if (!comp || !(comp instanceof CompItem)) {
 		return JSON.stringify({ status: "error", message: "コンポジションがアクティブではありません" });
 	}
 
+	var selectedLayers = null;
+	if (isSelectedOnly) {
+		selectedLayers = comp.selectedLayers;
+		if (!selectedLayers || selectedLayers.length === 0) {
+			return JSON.stringify({ status: "error", message: "レイヤーが選択されていません" });
+		}
+	}
+
 	app.beginUndoGroup(undoName);
 
 	try {
 		var counter = { count: 0 };
-		removeKeysRecursive(comp, comp.time, counter, isShift);
+		if (selectedLayers) {
+			// 選択レイヤー自身のプロパティのみ対象（プリコンポの中身は対象外）
+			for (var i = 0; i < selectedLayers.length; i++) {
+				removeKeysFromLayer(selectedLayers[i], comp.time, counter, isShift);
+			}
+		} else {
+			removeKeysRecursive(comp, comp.time, counter, isShift);
+		}
 
 		if (counter.count > 0) {
 			// Undoグループを閉じるには正常終了後に閉じる必要があるが、
