@@ -185,6 +185,29 @@
 		return panel;
 	}
 
+	// 時刻をフレームぴったりの位置に合わせる（スナップ）
+	// Math.round で整数フレーム番号を確定してから掛け算し、
+	// 浮動小数点誤差を 1e-6（マイクロ秒精度）で丸めて確実にフレーム境界に乗せる
+	function snapToFrame(time, frameDuration) {
+		var frameIndex = Math.round(time / frameDuration);
+		return Math.round(frameIndex * frameDuration * 1000000) / 1000000;
+	}
+
+	// [t0, t1) にあるキーフレームを削除する
+	function removeKeysInRange(prop, t0, t1) {
+		var eps = 0.0001;
+		for (var k = prop.numKeys; k >= 1; k--) {
+			var kt = prop.keyTime(k);
+			if (kt >= t0 - eps && kt < t1 - eps) prop.removeKey(k);
+		}
+	}
+
+	function setHoldKey(prop, time, value) {
+		var keyIndex = prop.addKey(time);
+		prop.setValueAtKey(keyIndex, value);
+		prop.setInterpolationTypeAtKey(keyIndex, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD);
+	}
+
 	// 実際の処理
 	function processSelectedLayers(regexString) {
 		var comp = app.project.activeItem;
@@ -198,6 +221,14 @@
 			alert("対象の音声レイヤーを選択してください。");
 			return;
 		}
+
+		var textLayers = [];
+		for (var t = 1; t <= comp.numLayers; t++) {
+			if (comp.layer(t) instanceof TextLayer) textLayers.push(comp.layer(t));
+		}
+
+		// 選択中の音声レイヤーごとの書き込み内容
+		var jobs = [];
 
 		for (var i = 0; i < selectedLayers.length; i++) {
 			var layer = selectedLayers[i];
@@ -245,15 +276,14 @@
 			var targetPrefix = match[1]; // 例: BBBB
 
 			// ----------------------------------------------------
-			// 3. 対象のテキストレイヤーを検索してキーフレームを追加
+			// 3. 対象のテキストレイヤーを検索
 			// ----------------------------------------------------
 			var targetTextLayer = null;
 
-			for (var j = 1; j <= comp.numLayers; j++) {
-				var l = comp.layer(j);
-				// テキストレイヤーであり、かつ名前がBBBBから始まるか(前方一致)確認
-				if (l instanceof TextLayer && l.name.indexOf(targetPrefix) === 0) {
-					targetTextLayer = l;
+			for (var j = 0; j < textLayers.length; j++) {
+				// 名前がBBBBから始まるか(前方一致)確認
+				if (textLayers[j].name.indexOf(targetPrefix) === 0) {
+					targetTextLayer = textLayers[j];
 					break;
 				}
 			}
@@ -265,37 +295,50 @@
 
 			// ソーステキストプロパティを取得 (言語設定に依存しないADBE名を使用)
 			var sourceTextProp = targetTextLayer.property("ADBE Text Properties").property("ADBE Text Document");
-			var opacityProp = targetTextLayer.property("ADBE Transform Group").property("ADBE Opacity");
+			if (!sourceTextProp) {
+				continue;
+			}
 
-			if (sourceTextProp) {
-				// 現在のテキストドキュメントのスタイルを保持したままテキストだけ書き換える
-				var textDoc = sourceTextProp.value;
-				textDoc.text = textContent;
+			// 音声レイヤーの区間 [インポイント, アウトポイント) をフレーム境界に合わせる
+			var startTime = snapToFrame(layer.inPoint, comp.frameDuration);
+			var endTime = snapToFrame(layer.outPoint, comp.frameDuration);
 
-				// インポイントの時間をフレームぴったりの位置に合わせる（スナップ）
-				// Math.round で整数フレーム番号を確定してから掛け算し、
-				// 浮動小数点誤差を 1e-6（マイクロ秒精度）で丸めて確実にフレーム境界に乗せる
-				var frameIndex = Math.round(layer.inPoint / comp.frameDuration);
-				var snappedTime = Math.round(frameIndex * comp.frameDuration * 1000000) / 1000000;
+			// 掃除前の区間開始時点のスタイルを保持したままテキストだけ書き換える (再生ヘッド位置に依存させない)
+			var textDoc = sourceTextProp.valueAtTime(startTime, true);
+			textDoc.text = textContent;
 
-				// 音声レイヤーのインポイント(開始時間)にキーフレームを追加
-				sourceTextProp.setValueAtTime(snappedTime, textDoc);
+			jobs.push({ order: i, startTime: startTime, endTime: endTime, target: targetTextLayer, sourceTextProp: sourceTextProp, textDoc: textDoc });
+		}
 
-				// コンポジション内のすべてのテキストレイヤーの不透明度を設定
-				for (var k = 1; k <= comp.numLayers; k++) {
-					var l = comp.layer(k);
-					if (l instanceof TextLayer) {
-						var otherOpacityProp = l.property("ADBE Transform Group").property("ADBE Opacity");
-						if (otherOpacityProp) {
-							if (l === targetTextLayer) {
-								// 対象のテキストレイヤーは不透明度を100%に
-								otherOpacityProp.setValueAtTime(snappedTime, 100);
-							} else {
-								// 対象以外のテキストレイヤーは不透明度を0%に
-								otherOpacityProp.setValueAtTime(snappedTime, 0);
-							}
-						}
-					}
+		// ----------------------------------------------------
+		// 4. 区間内の既存キーを掃除してからキーフレームを追加
+		// ----------------------------------------------------
+		// 区間が重なる場合は後から始まる音声を優先するため、開始時刻順に処理する
+		jobs.sort(function (a, b) {
+			return (a.startTime - b.startTime) || (a.order - b.order);
+		});
+
+		for (var n = 0; n < jobs.length; n++) {
+			var job = jobs[n];
+
+			// コンポジション内のすべてのテキストレイヤーについて、区間内のソーステキストと不透明度のキーを削除
+			for (var c = 0; c < textLayers.length; c++) {
+				var cleanSourceText = textLayers[c].property("ADBE Text Properties").property("ADBE Text Document");
+				var cleanOpacity = textLayers[c].property("ADBE Transform Group").property("ADBE Opacity");
+				if (cleanSourceText) removeKeysInRange(cleanSourceText, job.startTime, job.endTime);
+				if (cleanOpacity) removeKeysInRange(cleanOpacity, job.startTime, job.endTime);
+			}
+
+			// 音声レイヤーのインポイント(開始時間)にキーフレームを追加
+			job.sourceTextProp.setValueAtTime(job.startTime, job.textDoc);
+
+			// コンポジション内のすべてのテキストレイヤーの不透明度を設定 (停止補間)
+			for (var k = 0; k < textLayers.length; k++) {
+				var l = textLayers[k];
+				var opacityProp = l.property("ADBE Transform Group").property("ADBE Opacity");
+				if (opacityProp) {
+					// 対象のテキストレイヤーは不透明度を100%に、対象以外は0%に
+					setHoldKey(opacityProp, job.startTime, l === job.target ? 100 : 0);
 				}
 			}
 		}

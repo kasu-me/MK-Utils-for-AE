@@ -945,6 +945,7 @@ function moveTimeToSelectedLayerInPoint() {
 
 var LIPSYNC_COMMENT_PREFIX = "[psdtool_lipsync]";
 var LIPSYNC_SHAPES = ["a", "i", "u", "e", "o", "n"];
+var LIPSYNC_EPS = 0.0001;
 
 // 母音 (大文字は無声化母音)
 var LIPSYNC_VOWELS = { a: "a", i: "i", u: "u", e: "e", o: "o", A: "a", I: "i", U: "u", E: "e", O: "o" };
@@ -1166,18 +1167,37 @@ function generateLipSync(optionsStr) {
 	}
 
 	var results = [];
+	var jobs = [];
 	var selected = comp.selectedLayers;
 	app.beginUndoGroup("口パク生成");
 	try {
 		for (var j = 0; j < selected.length; j++) {
 			var result = { layer: selected[j].name };
 			try {
-				lipSyncProcessLayer(comp, selected[j], regex, configsBySpeaker, opt, result);
+				var job = lipSyncPrepareLayer(comp, selected[j], regex, configsBySpeaker, opt, result);
+				if (job) {
+					job.order = j;
+					jobs.push(job);
+				}
 			} catch (e) {
 				result.status = "error";
 				result.message = e.toString() + " (Line: " + e.line + ")";
 			}
 			results.push(result);
+		}
+
+		// 区間が重なる場合は後から始まる音声を優先するため、開始時刻順に処理する
+		jobs.sort(function (a, b) {
+			return (a.inFrame - b.inFrame) || (a.order - b.order);
+		});
+		lipSyncSampleBefore(jobs);
+		for (var w = 0; w < jobs.length; w++) {
+			try {
+				lipSyncWriteJob(jobs[w]);
+			} catch (e) {
+				jobs[w].result.status = "error";
+				jobs[w].result.message = e.toString() + " (Line: " + e.line + ")";
+			}
 		}
 	} finally {
 		app.endUndoGroup();
@@ -1185,7 +1205,8 @@ function generateLipSync(optionsStr) {
 	return JSON.stringify({ status: "success", results: results });
 }
 
-function lipSyncProcessLayer(rootComp, layer, regex, configsBySpeaker, opt, result) {
+// 音声レイヤー 1 つ分の口パクを計算する (キーは書き込まない)。対象外なら result に理由を入れて null を返す
+function lipSyncPrepareLayer(rootComp, layer, regex, configsBySpeaker, opt, result) {
 	if (!layer.source || !layer.source.mainSource || !layer.source.mainSource.file) {
 		result.status = "skip";
 		result.message = "音声ファイルのレイヤーではありません";
@@ -1271,43 +1292,96 @@ function lipSyncProcessLayer(rootComp, layer, regex, configsBySpeaker, opt, resu
 		return;
 	}
 
-	// lab の時刻は音声ファイル先頭からの秒数
+	// 掃除・生成する区間 (ルートのフレーム番号): 音声レイヤーの見えている範囲を先行フレーム分前にずらしたもの
 	var fd = rootComp.frameDuration;
 	var lead = opt.leadFrames || 0;
+	var inFrame = Math.round(layer.inPoint / fd) - lead;
+	var outFrame = Math.round(layer.outPoint / fd) - lead;
+	if (outFrame <= inFrame) {
+		result.status = "skip";
+		result.message = "音声レイヤーの長さが足りません";
+		return null;
+	}
+
+	// lab の時刻は音声ファイル先頭からの秒数。トリムで見えていない部分は区間の端に切り詰めて捨てる
 	var toFrame = function (sec) {
-		return Math.round((layer.startTime + sec * layer.stretch / 100) / fd) - lead;
+		var f = Math.round((layer.startTime + sec * layer.stretch / 100) / fd) - lead;
+		return Math.min(Math.max(f, inFrame), outFrame);
 	};
 	var segs = lipSyncQuantize(shapes, toFrame, Math.max(1, opt.minFrames || 1));
 	if (segs.length === 0) {
 		result.status = "skip";
 		result.message = "発話区間が短すぎます";
-		return;
+		return null;
 	}
 
 	var toLocal = function (frame) {
 		return rootTimeToLocalTime(frame * fd, chain);
 	};
-	var t0 = toLocal(segs[0].f0);
-	var t1 = toLocal(segs[segs.length - 1].f1);
-	var eps = 0.0001;
+	return {
+		result: result,
+		mouthComp: mouthComp,
+		mouthLayers: mouthLayers,
+		shapeLayers: shapeLayers,
+		segs: segs,
+		inFrame: inFrame,
+		toLocal: toLocal,
+		r0: toLocal(inFrame),
+		r1: toLocal(outFrame)
+	};
+}
 
-	// 発話終了時点の表示状態を記録し、発話区間内の既存キーを削除する
-	var after = [];
+// 各区間の直前の表示状態 (発話の前後に保つ値) を記録する。
+// 直前が同じ口差分に対する別の選択音声の区間内 (または隣接) なら、その音声の記録を引き継ぐ。
+// 今回書き換える範囲の値を読まないので、前回の生成結果に左右されない
+function lipSyncSampleBefore(jobs) {
+	var eps = LIPSYNC_EPS;
+	for (var i = 0; i < jobs.length; i++) {
+		var job = jobs[i];
+		job.before = null;
+		for (var p = i - 1; p >= 0; p--) {
+			var prev = jobs[p];
+			if (prev.mouthComp === job.mouthComp && job.r0 >= prev.r0 - eps && job.r0 <= prev.r1 + eps) {
+				job.before = prev.before;
+				break;
+			}
+		}
+		if (!job.before) {
+			job.before = [];
+			for (var a = 0; a < job.mouthLayers.length; a++) {
+				job.before.push(lipSyncOpacity(job.mouthLayers[a]).valueAtTime(job.r0 - eps, true));
+			}
+		}
+	}
+}
+
+// 区間内の既存キーを削除してから口パクのキーを書き込む
+function lipSyncWriteJob(job) {
+	var eps = LIPSYNC_EPS;
+	var mouthLayers = job.mouthLayers;
+	var segs = job.segs;
+
 	for (var a = 0; a < mouthLayers.length; a++) {
 		var prop = lipSyncOpacity(mouthLayers[a]);
-		after.push(prop.valueAtTime(t1, true));
 		for (var k = prop.numKeys; k >= 1; k--) {
 			var kt = prop.keyTime(k);
-			if (kt >= t0 - eps && kt < t1 - eps) prop.removeKey(k);
+			if (kt >= job.r0 - eps && kt < job.r1 - eps) prop.removeKey(k);
+		}
+	}
+
+	// lab の先頭が区間の開始より後なら、発話開始までは区間直前の表示状態を保つ
+	if (segs[0].f0 > job.inFrame) {
+		for (var b = 0; b < mouthLayers.length; b++) {
+			lipSyncSetHoldKey(lipSyncOpacity(mouthLayers[b]), job.r0, job.before[b]);
 		}
 	}
 
 	// 口の形が変わる時点ごとにキーを打つ (先頭は全レイヤー、以降は変化したレイヤーのみ)
 	var current = null;
 	for (var g = 0; g < segs.length; g++) {
-		var visibleLayer = shapeLayers[segs[g].shape];
+		var visibleLayer = job.shapeLayers[segs[g].shape];
 		if (visibleLayer === current) continue; // 複数の母音に同じ差分を割り当てている場合
-		var time = toLocal(segs[g].f0);
+		var time = job.toLocal(segs[g].f0);
 		for (var n = 0; n < mouthLayers.length; n++) {
 			var ml = mouthLayers[n];
 			if (current !== null && ml !== current && ml !== visibleLayer) continue;
@@ -1317,12 +1391,13 @@ function lipSyncProcessLayer(rootComp, layer, regex, configsBySpeaker, opt, resu
 		current = visibleLayer;
 	}
 
-	// 発話終了時点で元の表示状態に戻す
+	// 発話終了時点で区間直前の表示状態に戻す
+	var tEnd = job.toLocal(segs[segs.length - 1].f1);
 	for (var r = 0; r < mouthLayers.length; r++) {
-		lipSyncSetHoldKey(lipSyncOpacity(mouthLayers[r]), t1, after[r]);
+		lipSyncSetHoldKey(lipSyncOpacity(mouthLayers[r]), tEnd, job.before[r]);
 	}
 
-	result.status = "ok";
-	result.message = segs.length + "区間";
+	job.result.status = "ok";
+	job.result.message = segs.length + "区間";
 }
 

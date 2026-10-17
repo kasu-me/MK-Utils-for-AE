@@ -108,7 +108,7 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 
 **LipSync (口パク):**
 - Per-character config is stored in the **comment field of the mouth-variant folder comp** as `"[psdtool_lipsync]" + JSON` (`{ speaker, map: { a, i, u, e, o, n → layer name } }`), so it travels with the .aep (template projects). See `getLipSyncConfigs()` / `saveLipSyncConfig()` in hostscript.jsx.
-- `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex (same convention as ImportSubtitles), finds the mouth comp nested in the active comp, and writes HOLD opacity keys. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
+- `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex (same convention as ImportSubtitles), finds the mouth comp nested in the active comp, and writes HOLD opacity keys. Regeneration only clears keys inside each selected audio's visible range (in/out point shifted by lead frames), processed in start-time order so a later clip wins; leftovers outside that range are left as-is. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
 - Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`.
 
 **Hierarchy node (JSON from backend):**
@@ -168,3 +168,5 @@ C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI P
 ```
 
 It embeds the BudouX Japanese phrase-breaking model inline as a hardcoded data structure (lines ~18-19). The model is from Google's BudouX project (Apache 2.0). The `budouxParse()` function uses this model to determine phrase boundaries for intelligent line-wrapping of Japanese subtitle text.
+
+"テキスト反映" first removes Source Text / Opacity keys of all text layers within each selected audio layer's `[inPoint, outPoint)`, then writes the subtitle key at inPoint and HOLD opacity keys (target 100, others 0), in start-time order.
