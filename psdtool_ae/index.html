@@ -22,6 +22,16 @@
 			</div>
 			<div id="status-keyframe" style="margin-top: 5px; color: #888; font-size: 0.9em; min-height: 1.2em;"></div>
 		</div>
+
+		<!-- LipSync Controls -->
+		<div class="lipsync-section" style="margin-top: 10px;">
+			<div class="section-label" style="font-weight:600; margin-bottom:6px;">口パク</div>
+			<div style="display: flex; gap: 5px; align-items: center;">
+				<button id="btn-lipsync-settings" style="flex: 1;">口パク設定</button>
+				<button id="btn-lipsync-generate" style="flex: 2;" title="選択した音声レイヤーと同名のlabファイルから口パクを生成">選択音声から口パク生成</button>
+			</div>
+			<div id="status-lipsync"></div>
+		</div>
 	</div>
 
 	<div id="main-area">
@@ -58,6 +68,40 @@
 				</div>
 				<div id="storage-list-container">
 					<!-- List items will be injected here -->
+				</div>
+			</div>
+		</div>
+
+		<!-- LipSync Settings Modal -->
+		<div id="lipsync-modal" class="modal">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h3>口パク設定</h3>
+					<span class="close-modal" id="lipsync-modal-close">&times;</span>
+				</div>
+				<div id="lipsync-modal-body">
+					<div class="lipsync-group-label">共通設定</div>
+					<div class="lipsync-field">
+						<label for="lipsync-regex">話者名の抽出正規表現</label>
+						<input type="text" id="lipsync-regex">
+					</div>
+					<div class="lipsync-field-row">
+						<div class="lipsync-field">
+							<label for="lipsync-lead">先行フレーム数</label>
+							<input type="number" id="lipsync-lead" min="0" max="10">
+						</div>
+						<div class="lipsync-field">
+							<label for="lipsync-min">最短表示フレーム数</label>
+							<input type="number" id="lipsync-min" min="1" max="10">
+						</div>
+					</div>
+
+					<div class="lipsync-group-label">キャラクター</div>
+					<div id="lipsync-config-list"></div>
+					<div class="lipsync-add-row">
+						<select id="lipsync-candidate"></select>
+						<button id="btn-lipsync-add">追加</button>
+					</div>
 				</div>
 			</div>
 		</div>

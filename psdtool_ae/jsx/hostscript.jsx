@@ -71,6 +71,9 @@ if (typeof JSON !== 'object') {
 			return str('', { '': value });
 		};
 	}
+	if (typeof JSON.parse !== 'function') {
+		JSON.parse = function (text) { return eval('(' + text + ')'); };
+	}
 }());
 
 // Main Functions
@@ -916,5 +919,395 @@ function moveTimeToSelectedLayerInPoint() {
 		return "true";
 	}
 	return "false";
+}
+
+// ---------------------------------------------------------
+// LipSync (lab ファイルによる母音口パク)
+// ---------------------------------------------------------
+// 口パク設定は口差分フォルダ（プリコンプ）のコメント欄に JSON で保存する。
+// プロジェクトファイル自体に保存されるため、テンプレートプロジェクトを複製しても設定が引き継がれる。
+//   comment = "[psdtool_lipsync]" + JSON.stringify({ speaker: "音街ウナ", map: { a: "ワ", i: "にっ", ... } })
+
+var LIPSYNC_COMMENT_PREFIX = "[psdtool_lipsync]";
+var LIPSYNC_SHAPES = ["a", "i", "u", "e", "o", "n"];
+
+// 母音 (大文字は無声化母音)
+var LIPSYNC_VOWELS = { a: "a", i: "i", u: "u", e: "e", o: "o", A: "a", I: "i", U: "u", E: "e", O: "o" };
+// 口を閉じる音素: 撥音・促音・無音・両唇音
+var LIPSYNC_CLOSED = { N: true, cl: true, pau: true, sil: true, m: true, my: true, b: true, by: true, p: true, py: true };
+
+// lab テキストを [{ start, end, ph }] (秒) に変換する。時刻の単位は 100ns。
+function lipSyncParseLab(text) {
+	var segs = [];
+	var lines = text.split(/\r\n|\r|\n/);
+	for (var i = 0; i < lines.length; i++) {
+		var parts = lines[i].replace(/^\s+|\s+$/g, "").split(/\s+/);
+		if (parts.length < 3) continue;
+		var start = parseFloat(parts[0]);
+		var end = parseFloat(parts[1]);
+		if (isNaN(start) || isNaN(end)) continue;
+		segs.push({ start: start / 10000000, end: end / 10000000, ph: parts[2] });
+	}
+	return segs;
+}
+
+// 音素列を口の形の区間列 [{ start, end, shape }] に変換する。
+// 子音は直後の母音の形を先取りし、lab に行がない隙間は閉じ口で埋める。
+function lipSyncBuildShapes(segs) {
+	var out = [];
+	for (var i = 0; i < segs.length; i++) {
+		var seg = segs[i];
+		var shape;
+		if (LIPSYNC_VOWELS.hasOwnProperty(seg.ph)) {
+			shape = LIPSYNC_VOWELS[seg.ph];
+		} else if (LIPSYNC_CLOSED.hasOwnProperty(seg.ph)) {
+			shape = "n";
+		} else {
+			var next = segs[i + 1];
+			shape = (next && LIPSYNC_VOWELS.hasOwnProperty(next.ph)) ? LIPSYNC_VOWELS[next.ph] : "n";
+		}
+
+		var last = out[out.length - 1];
+		if (last && seg.start > last.end + 0.0001) {
+			out.push({ start: last.end, end: seg.start, shape: "n" });
+		}
+		out.push({ start: seg.start, end: seg.end, shape: shape });
+	}
+	return out;
+}
+
+// 秒単位の区間をフレーム単位 [{ f0, f1, shape }] に丸め、短すぎる区間と同じ形の連続をまとめる。
+function lipSyncQuantize(shapes, toFrame, minFrames) {
+	var segs = [];
+	for (var i = 0; i < shapes.length; i++) {
+		var f0 = toFrame(shapes[i].start);
+		var f1 = toFrame(shapes[i].end);
+		if (f1 > f0) segs.push({ f0: f0, f1: f1, shape: shapes[i].shape });
+	}
+
+	var merged = [];
+	for (var j = 0; j < segs.length; j++) {
+		var s = segs[j];
+		var last = merged[merged.length - 1];
+		if (last && (s.shape === last.shape || s.f1 - s.f0 < minFrames)) {
+			last.f1 = s.f1;
+		} else {
+			merged.push({ f0: s.f0, f1: s.f1, shape: s.shape });
+		}
+	}
+
+	// 先頭の短い区間は後ろへ吸収
+	if (merged.length > 1 && merged[0].f1 - merged[0].f0 < minFrames) {
+		merged[1].f0 = merged[0].f0;
+		merged.shift();
+	}
+
+	// 吸収の結果、同じ形が隣り合ったものを結合
+	var result = [];
+	for (var k = 0; k < merged.length; k++) {
+		var prev = result[result.length - 1];
+		if (prev && prev.shape === merged[k].shape) {
+			prev.f1 = merged[k].f1;
+		} else {
+			result.push(merged[k]);
+		}
+	}
+	return result;
+}
+
+function lipSyncReadConfig(comp) {
+	var c = comp.comment;
+	if (!c || c.indexOf(LIPSYNC_COMMENT_PREFIX) !== 0) return null;
+	try {
+		return JSON.parse(c.substring(LIPSYNC_COMMENT_PREFIX.length));
+	} catch (e) {
+		return null;
+	}
+}
+
+// 口差分コンポジションを使用している親コンポジション名 (表示用)
+function lipSyncParentCompName(comp) {
+	for (var i = 1; i <= app.project.numItems; i++) {
+		var item = app.project.item(i);
+		if (!(item instanceof CompItem)) continue;
+		for (var j = 1; j <= item.numLayers; j++) {
+			if (item.layer(j).source === comp) return item.name;
+		}
+	}
+	return "";
+}
+
+function getLipSyncConfigs() {
+	try {
+		var configs = [];
+		for (var i = 1; i <= app.project.numItems; i++) {
+			var item = app.project.item(i);
+			if (!(item instanceof CompItem)) continue;
+			var cfg = lipSyncReadConfig(item);
+			if (!cfg) continue;
+
+			var layerNames = [];
+			for (var j = 1; j <= item.numLayers; j++) layerNames.push(item.layer(j).name);
+
+			configs.push({
+				compId: item.id,
+				compName: item.name,
+				parentName: lipSyncParentCompName(item),
+				speaker: cfg.speaker || "",
+				map: cfg.map || {},
+				layerNames: layerNames
+			});
+		}
+		return JSON.stringify({ status: "success", configs: configs });
+	} catch (e) {
+		return JSON.stringify({ status: "error", message: e.toString() });
+	}
+}
+
+function saveLipSyncConfig(configStr) {
+	try {
+		var cfg = JSON.parse(configStr);
+		var comp = getCompById(cfg.compId);
+		if (!comp) return JSON.stringify({ status: "error", message: "口差分のコンポジションが見つかりません" });
+
+		if (comp.comment && comp.comment.indexOf(LIPSYNC_COMMENT_PREFIX) !== 0) {
+			return JSON.stringify({ status: "error", message: "コンポジション「" + comp.name + "」のコメント欄が使用中のため保存できません。コメントを空にしてから再度保存してください。" });
+		}
+
+		app.beginUndoGroup("口パク設定を保存");
+		comp.comment = LIPSYNC_COMMENT_PREFIX + JSON.stringify({ speaker: cfg.speaker, map: cfg.map });
+		app.endUndoGroup();
+		return JSON.stringify({ status: "success" });
+	} catch (e) {
+		return JSON.stringify({ status: "error", message: e.toString() });
+	}
+}
+
+function deleteLipSyncConfig(compId) {
+	try {
+		var comp = getCompById(compId);
+		if (!comp) return JSON.stringify({ status: "error", message: "口差分のコンポジションが見つかりません" });
+		if (lipSyncReadConfig(comp)) {
+			app.beginUndoGroup("口パク設定を削除");
+			comp.comment = "";
+			app.endUndoGroup();
+		}
+		return JSON.stringify({ status: "success" });
+	} catch (e) {
+		return JSON.stringify({ status: "error", message: e.toString() });
+	}
+}
+
+// root から target までのプリコンプレイヤーの連鎖を探す (見つからなければ null)
+function lipSyncFindCompPath(root, target) {
+	if (root === target) return [];
+	for (var i = 1; i <= root.numLayers; i++) {
+		var layer = root.layer(i);
+		if (!(layer.source instanceof CompItem)) continue;
+		var sub = lipSyncFindCompPath(layer.source, target);
+		if (sub) return [layer].concat(sub);
+	}
+	return null;
+}
+
+function lipSyncOpacity(layer) {
+	return layer.property("ADBE Transform Group").property("ADBE Opacity");
+}
+
+function lipSyncSetHoldKey(prop, time, value) {
+	var keyIndex = prop.addKey(time);
+	prop.setValueAtKey(keyIndex, value);
+	prop.setInterpolationTypeAtKey(keyIndex, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD);
+}
+
+// 選択中の音声レイヤーごとに、同名の lab ファイルから口パクのキーフレームを生成する
+function generateLipSync(optionsStr) {
+	var comp = app.project.activeItem;
+	if (!comp || !(comp instanceof CompItem)) {
+		return JSON.stringify({ status: "error", message: "コンポジションを選択してから実行してください。" });
+	}
+	if (comp.selectedLayers.length === 0) {
+		return JSON.stringify({ status: "error", message: "対象の音声レイヤーを選択してください。" });
+	}
+
+	var opt;
+	var regex;
+	try {
+		opt = JSON.parse(optionsStr);
+		regex = new RegExp(opt.regex);
+	} catch (e) {
+		return JSON.stringify({ status: "error", message: "設定が正しくありません: " + e.toString() });
+	}
+
+	// 話者名 -> 口差分コンポジション
+	var configsBySpeaker = {};
+	for (var i = 1; i <= app.project.numItems; i++) {
+		var item = app.project.item(i);
+		if (!(item instanceof CompItem)) continue;
+		var cfg = lipSyncReadConfig(item);
+		if (cfg && cfg.speaker && !configsBySpeaker.hasOwnProperty(cfg.speaker)) {
+			configsBySpeaker[cfg.speaker] = { comp: item, map: cfg.map };
+		}
+	}
+
+	var results = [];
+	var selected = comp.selectedLayers;
+	app.beginUndoGroup("口パク生成");
+	try {
+		for (var j = 0; j < selected.length; j++) {
+			var result = { layer: selected[j].name };
+			try {
+				lipSyncProcessLayer(comp, selected[j], regex, configsBySpeaker, opt, result);
+			} catch (e) {
+				result.status = "error";
+				result.message = e.toString() + " (Line: " + e.line + ")";
+			}
+			results.push(result);
+		}
+	} finally {
+		app.endUndoGroup();
+	}
+	return JSON.stringify({ status: "success", results: results });
+}
+
+function lipSyncProcessLayer(rootComp, layer, regex, configsBySpeaker, opt, result) {
+	if (!layer.source || !layer.source.mainSource || !layer.source.mainSource.file) {
+		result.status = "skip";
+		result.message = "音声ファイルのレイヤーではありません";
+		return;
+	}
+
+	var audioFile = layer.source.mainSource.file;
+	var dot = audioFile.fsName.lastIndexOf(".");
+	var labFile = new File(audioFile.fsName.substring(0, dot > -1 ? dot : audioFile.fsName.length) + ".lab");
+	if (!labFile.exists) {
+		result.status = "skip";
+		result.message = "labファイルがありません";
+		return;
+	}
+
+	var fileName = decodeURI(audioFile.name);
+	var match = fileName.substring(0, fileName.lastIndexOf(".")).match(regex);
+	if (!match || match.length < 2) {
+		result.status = "skip";
+		result.message = "ファイル名から話者名を抽出できません";
+		return;
+	}
+	var speaker = match[1];
+	result.speaker = speaker;
+
+	var config = configsBySpeaker[speaker];
+	if (!config) {
+		result.status = "skip";
+		result.message = "話者「" + speaker + "」の口パク設定がありません";
+		return;
+	}
+
+	var mouthComp = config.comp;
+	var chain = lipSyncFindCompPath(rootComp, mouthComp);
+	if (!chain) {
+		result.status = "skip";
+		result.message = "このコンポジション内に「" + speaker + "」の立ち絵が見つかりません";
+		return;
+	}
+	for (var c = 0; c < chain.length; c++) {
+		if (chain[c].timeRemapEnabled) {
+			result.status = "skip";
+			result.message = "タイムリマップが有効な立ち絵には未対応です (" + chain[c].name + ")";
+			return;
+		}
+	}
+
+	// 口差分レイヤー: ラジオボタン (*) のものを対象とし、なければロック (!) 以外すべて
+	var mouthLayers = [];
+	for (var i = 1; i <= mouthComp.numLayers; i++) {
+		if (mouthComp.layer(i).name.indexOf("*") === 0) mouthLayers.push(mouthComp.layer(i));
+	}
+	if (mouthLayers.length === 0) {
+		for (var i2 = 1; i2 <= mouthComp.numLayers; i2++) {
+			if (mouthComp.layer(i2).name.indexOf("!") !== 0) mouthLayers.push(mouthComp.layer(i2));
+		}
+	}
+
+	var shapeLayers = {};
+	for (var s = 0; s < LIPSYNC_SHAPES.length; s++) {
+		var shape = LIPSYNC_SHAPES[s];
+		var target = null;
+		for (var m = 0; m < mouthLayers.length; m++) {
+			if (mouthLayers[m].name === config.map[shape]) { target = mouthLayers[m]; break; }
+		}
+		if (!target) {
+			result.status = "error";
+			result.message = "口差分レイヤー「" + config.map[shape] + "」が見つかりません。口パク設定を確認してください";
+			return;
+		}
+		shapeLayers[shape] = target;
+	}
+
+	labFile.encoding = "UTF-8";
+	labFile.open("r");
+	var labText = labFile.read();
+	labFile.close();
+
+	var shapes = lipSyncBuildShapes(lipSyncParseLab(labText));
+	if (shapes.length === 0) {
+		result.status = "skip";
+		result.message = "labファイルに音素がありません";
+		return;
+	}
+
+	// lab の時刻は音声ファイル先頭からの秒数
+	var fd = rootComp.frameDuration;
+	var lead = opt.leadFrames || 0;
+	var toFrame = function (sec) {
+		return Math.round((layer.startTime + sec * layer.stretch / 100) / fd) - lead;
+	};
+	var segs = lipSyncQuantize(shapes, toFrame, Math.max(1, opt.minFrames || 1));
+	if (segs.length === 0) {
+		result.status = "skip";
+		result.message = "発話区間が短すぎます";
+		return;
+	}
+
+	var toLocal = function (frame) {
+		return rootTimeToLocalTime(frame * fd, chain);
+	};
+	var t0 = toLocal(segs[0].f0);
+	var t1 = toLocal(segs[segs.length - 1].f1);
+	var eps = 0.0001;
+
+	// 発話終了時点の表示状態を記録し、発話区間内の既存キーを削除する
+	var after = [];
+	for (var a = 0; a < mouthLayers.length; a++) {
+		var prop = lipSyncOpacity(mouthLayers[a]);
+		after.push(prop.valueAtTime(t1, true));
+		for (var k = prop.numKeys; k >= 1; k--) {
+			var kt = prop.keyTime(k);
+			if (kt >= t0 - eps && kt < t1 - eps) prop.removeKey(k);
+		}
+	}
+
+	// 口の形が変わる時点ごとにキーを打つ (先頭は全レイヤー、以降は変化したレイヤーのみ)
+	var current = null;
+	for (var g = 0; g < segs.length; g++) {
+		var visibleLayer = shapeLayers[segs[g].shape];
+		if (visibleLayer === current) continue; // 複数の母音に同じ差分を割り当てている場合
+		var time = toLocal(segs[g].f0);
+		for (var n = 0; n < mouthLayers.length; n++) {
+			var ml = mouthLayers[n];
+			if (current !== null && ml !== current && ml !== visibleLayer) continue;
+			if (ml === visibleLayer) ml.enabled = true;
+			lipSyncSetHoldKey(lipSyncOpacity(ml), time, ml === visibleLayer ? 100 : 0);
+		}
+		current = visibleLayer;
+	}
+
+	// 発話終了時点で元の表示状態に戻す
+	for (var r = 0; r < mouthLayers.length; r++) {
+		lipSyncSetHoldKey(lipSyncOpacity(mouthLayers[r]), t1, after[r]);
+	}
+
+	result.status = "ok";
+	result.message = segs.length + "区間";
 }
 

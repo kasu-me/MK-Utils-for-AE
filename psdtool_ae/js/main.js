@@ -26,6 +26,15 @@ document.getElementById('btn-get-keys').addEventListener('click', getKeyframesFr
 document.getElementById('btn-move-keys').addEventListener('click', moveKeyframesToCurrentTime);
 document.getElementById('btn-delete-keys').addEventListener('click', removeKeyframesAtCurrentTime);
 
+// LipSync Events
+document.getElementById('btn-lipsync-settings').addEventListener('click', openLipSyncModal);
+document.getElementById('btn-lipsync-generate').addEventListener('click', generateLipSync);
+document.getElementById('btn-lipsync-add').addEventListener('click', addLipSyncCandidate);
+document.getElementById('lipsync-modal-close').addEventListener('click', closeLipSyncModal);
+['lipsync-regex', 'lipsync-lead', 'lipsync-min'].forEach(function (id) {
+	document.getElementById(id).addEventListener('change', saveLipSyncSettingsFromForm);
+});
+
 // 初期状態: moveボタンは無効化
 var btnMoveKeys = document.getElementById('btn-move-keys');
 if (btnMoveKeys) btnMoveKeys.disabled = true;
@@ -146,6 +155,9 @@ window.onclick = function (event) {
 	if (event.target == modal) {
 		modal.style.display = "none";
 	}
+	if (event.target == document.getElementById("lipsync-modal")) {
+		closeLipSyncModal();
+	}
 }
 
 // 起動時に自動読み込み
@@ -154,6 +166,7 @@ setTimeout(loadHierarchy, 100);
 // 状態保存用グローバル変数
 var g_expansionState = {}; // { compId: { "layerKey": isExpanded, ... } }
 var g_lastCompId = null;
+var g_lastHierarchy = null; // 口パク設定の候補探索用
 var g_currentProjectPath = null;
 
 // Preset Logic
@@ -439,6 +452,7 @@ function renderTree(data) {
 
 	// カレントのCompIDを記録（次回の保存のため）
 	g_lastCompId = data.id;
+	g_lastHierarchy = data;
 
 	var rootUl = document.createElement('ul');
 	rootUl.className = 'tree-root';
@@ -1109,4 +1123,324 @@ function importPresetsFromData(storageKey) {
 	} catch (e) {
 		alert("データの読み込みに失敗しました: " + e);
 	}
+}
+
+// ------ LipSync ------
+
+var LIPSYNC_SETTINGS_KEY = 'psdtool_lipsync_settings';
+var LIPSYNC_SHAPES = [
+	{ key: 'a', label: 'あ' },
+	{ key: 'i', label: 'い' },
+	{ key: 'u', label: 'う' },
+	{ key: 'e', label: 'え' },
+	{ key: 'o', label: 'お' },
+	{ key: 'n', label: 'ん(閉)' }
+];
+
+function loadLipSyncSettings() {
+	var settings = { regex: '.*-.*-(.*)-.*', leadFrames: 1, minFrames: 1 };
+	try {
+		var saved = JSON.parse(localStorage.getItem(LIPSYNC_SETTINGS_KEY));
+		if (saved) {
+			if (typeof saved.regex === 'string') settings.regex = saved.regex;
+			if (typeof saved.leadFrames === 'number') settings.leadFrames = saved.leadFrames;
+			if (typeof saved.minFrames === 'number') settings.minFrames = saved.minFrames;
+		}
+	} catch (e) { }
+	return settings;
+}
+
+function saveLipSyncSettingsFromForm() {
+	var regex = document.getElementById('lipsync-regex').value;
+	try {
+		new RegExp(regex);
+	} catch (e) {
+		alert("入力された正規表現が正しくありません。\nエラー: " + e.message);
+		return;
+	}
+	var lead = parseInt(document.getElementById('lipsync-lead').value, 10);
+	var min = parseInt(document.getElementById('lipsync-min').value, 10);
+	localStorage.setItem(LIPSYNC_SETTINGS_KEY, JSON.stringify({
+		regex: regex,
+		leadFrames: isNaN(lead) || lead < 0 ? 0 : lead,
+		minFrames: isNaN(min) || min < 1 ? 1 : min
+	}));
+}
+
+function openLipSyncModal() {
+	var settings = loadLipSyncSettings();
+	document.getElementById('lipsync-regex').value = settings.regex;
+	document.getElementById('lipsync-lead').value = settings.leadFrames;
+	document.getElementById('lipsync-min').value = settings.minFrames;
+
+	var list = document.getElementById('lipsync-config-list');
+	list.innerHTML = '<p class="lipsync-empty">読み込み中...</p>';
+	document.getElementById('lipsync-modal').style.display = 'block';
+
+	csInterface.evalScript('getLipSyncConfigs()', function (res) {
+		var data;
+		try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
+		list.innerHTML = '';
+		if (data.status !== 'success') {
+			list.innerHTML = '<p class="lipsync-empty"></p>';
+			list.firstChild.textContent = '設定の取得に失敗しました: ' + data.message;
+			return;
+		}
+		data.configs.forEach(function (cfg) {
+			var title = cfg.parentName ? cfg.parentName + ' / ' + cfg.compName : cfg.compName;
+			list.appendChild(createLipSyncCard(cfg.compId, title, cfg.speaker, cfg.map, cfg.layerNames, true));
+		});
+		updateLipSyncEmptyMessage();
+		refreshLipSyncCandidates();
+	});
+}
+
+function closeLipSyncModal() {
+	var unsaved = document.querySelectorAll('#lipsync-config-list .lipsync-card.unsaved');
+	if (unsaved.length > 0 && !confirm('保存されていない設定があります。閉じてもよろしいですか？')) {
+		return;
+	}
+	document.getElementById('lipsync-modal').style.display = 'none';
+}
+
+function updateLipSyncEmptyMessage() {
+	var list = document.getElementById('lipsync-config-list');
+	var empty = list.querySelector('.lipsync-empty');
+	if (list.querySelector('.lipsync-card')) {
+		if (empty) list.removeChild(empty);
+	} else if (!empty) {
+		var p = document.createElement('p');
+		p.className = 'lipsync-empty';
+		p.textContent = '口パク設定はまだありません。下の一覧から口差分のフォルダを選んで追加してください。';
+		list.appendChild(p);
+	}
+}
+
+// 現在のツリーから、ラジオボタン(*)の子を持つフォルダを口差分の候補として列挙する
+function collectLipSyncCandidates() {
+	var candidates = [];
+	if (!g_lastHierarchy || !g_lastHierarchy.children) return candidates;
+
+	function traverse(node, path) {
+		if (!node.children) return;
+		var currentPath = path.concat([node.name]);
+		var hasRadio = node.children.some(function (c) { return c.mode === 'radio'; });
+		if (node.type === 'folder' && hasRadio) {
+			candidates.push({
+				compId: node.compId,
+				label: currentPath.join(' / '),
+				rootName: currentPath.length > 1 ? currentPath[0] : g_lastHierarchy.name,
+				layerNames: node.children.map(function (c) { return c.name; })
+			});
+		}
+		node.children.forEach(function (c) { traverse(c, currentPath); });
+	}
+	g_lastHierarchy.children.forEach(function (c) { traverse(c, []); });
+	return candidates;
+}
+
+function refreshLipSyncCandidates() {
+	var select = document.getElementById('lipsync-candidate');
+	select.innerHTML = '';
+
+	var usedIds = {};
+	document.querySelectorAll('#lipsync-config-list .lipsync-card').forEach(function (card) {
+		usedIds[card.dataset.compId] = true;
+	});
+
+	var seen = {};
+	collectLipSyncCandidates().forEach(function (c) {
+		if (usedIds[c.compId] || seen[c.compId]) return;
+		seen[c.compId] = true;
+		var opt = document.createElement('option');
+		opt.value = c.compId;
+		opt.textContent = c.label;
+		opt.candidate = c;
+		select.appendChild(opt);
+	});
+
+	var disabled = select.options.length === 0;
+	if (disabled) {
+		var opt = document.createElement('option');
+		opt.textContent = g_lastHierarchy ? '(追加できるフォルダがありません)' : '(ツリーを再読み込みしてください)';
+		select.appendChild(opt);
+	}
+	select.disabled = disabled;
+	document.getElementById('btn-lipsync-add').disabled = disabled;
+}
+
+function addLipSyncCandidate() {
+	var select = document.getElementById('lipsync-candidate');
+	var opt = select.options[select.selectedIndex];
+	if (!opt || !opt.candidate) return;
+	var c = opt.candidate;
+
+	// 話者名の初期値は立ち絵のコンポジション名 (拡張子除く)
+	var speaker = c.rootName.replace(/\.psd$/i, '');
+	var card = createLipSyncCard(c.compId, c.label, speaker, {}, c.layerNames, false);
+	document.getElementById('lipsync-config-list').appendChild(card);
+	updateLipSyncEmptyMessage();
+	refreshLipSyncCandidates();
+	card.querySelector('input').focus();
+}
+
+function createLipSyncCard(compId, title, speaker, map, layerNames, saved) {
+	var card = document.createElement('div');
+	card.className = 'lipsync-card' + (saved ? '' : ' unsaved');
+	card.dataset.compId = compId;
+
+	var titleDiv = document.createElement('div');
+	titleDiv.className = 'lipsync-card-title';
+	titleDiv.textContent = title;
+	titleDiv.title = title;
+	card.appendChild(titleDiv);
+
+	var speakerField = document.createElement('div');
+	speakerField.className = 'lipsync-field';
+	var speakerLabel = document.createElement('label');
+	speakerLabel.textContent = '話者名 (音声ファイル名から抽出される名前)';
+	var speakerInput = document.createElement('input');
+	speakerInput.type = 'text';
+	speakerInput.value = speaker;
+	speakerField.appendChild(speakerLabel);
+	speakerField.appendChild(speakerInput);
+	card.appendChild(speakerField);
+
+	var markUnsaved = function () { card.classList.add('unsaved'); };
+	speakerInput.addEventListener('input', markUnsaved);
+
+	var mapDiv = document.createElement('div');
+	mapDiv.className = 'lipsync-map';
+	var selects = {};
+	LIPSYNC_SHAPES.forEach(function (shape) {
+		var label = document.createElement('label');
+		label.textContent = shape.label;
+		var select = document.createElement('select');
+
+		var emptyOpt = document.createElement('option');
+		emptyOpt.value = '';
+		emptyOpt.textContent = '(未選択)';
+		select.appendChild(emptyOpt);
+		layerNames.forEach(function (name) {
+			var opt = document.createElement('option');
+			opt.value = name;
+			opt.textContent = name;
+			select.appendChild(opt);
+		});
+		select.value = map[shape.key] && layerNames.indexOf(map[shape.key]) >= 0 ? map[shape.key] : '';
+		select.addEventListener('change', markUnsaved);
+
+		selects[shape.key] = select;
+		mapDiv.appendChild(label);
+		mapDiv.appendChild(select);
+	});
+	card.appendChild(mapDiv);
+
+	var actions = document.createElement('div');
+	actions.className = 'lipsync-actions';
+	var saveBtn = document.createElement('button');
+	saveBtn.textContent = '保存';
+	var deleteBtn = document.createElement('button');
+	deleteBtn.textContent = '削除';
+	actions.appendChild(saveBtn);
+	actions.appendChild(deleteBtn);
+	card.appendChild(actions);
+
+	saveBtn.onclick = function () {
+		var name = speakerInput.value.trim();
+		if (!name) {
+			alert('話者名を入力してください。');
+			return;
+		}
+		var newMap = {};
+		var missing = [];
+		LIPSYNC_SHAPES.forEach(function (shape) {
+			newMap[shape.key] = selects[shape.key].value;
+			if (!newMap[shape.key]) missing.push(shape.label);
+		});
+		if (missing.length > 0) {
+			alert('口差分が選択されていません: ' + missing.join('、') + '\n同じ差分を複数の母音に割り当てることもできます。');
+			return;
+		}
+
+		var duplicated = false;
+		document.querySelectorAll('#lipsync-config-list .lipsync-card').forEach(function (other) {
+			if (other !== card && other.querySelector('input').value.trim() === name) duplicated = true;
+		});
+		if (duplicated && !confirm('話者名「' + name + '」は他のキャラクターにも設定されています。口パク生成時はどちらか一方のみ使われます。保存しますか？')) {
+			return;
+		}
+
+		var cfg = { compId: compId, speaker: name, map: newMap };
+		csInterface.evalScript('saveLipSyncConfig(' + JSON.stringify(JSON.stringify(cfg)) + ')', function (res) {
+			var data;
+			try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
+			if (data.status === 'success') {
+				saved = true;
+				speakerInput.value = name;
+				card.classList.remove('unsaved');
+			} else {
+				alert('保存に失敗しました: ' + data.message);
+			}
+		});
+	};
+
+	deleteBtn.onclick = function () {
+		var removeCard = function () {
+			card.parentNode.removeChild(card);
+			updateLipSyncEmptyMessage();
+			refreshLipSyncCandidates();
+		};
+		if (!saved) {
+			removeCard();
+			return;
+		}
+		if (!confirm('「' + title + '」の口パク設定を削除しますか？')) return;
+		csInterface.evalScript('deleteLipSyncConfig(' + compId + ')', function (res) {
+			var data;
+			try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
+			if (data.status === 'success') {
+				removeCard();
+			} else {
+				alert('削除に失敗しました: ' + data.message);
+			}
+		});
+	};
+
+	return card;
+}
+
+function generateLipSync() {
+	var statusDiv = document.getElementById('status-lipsync');
+	var settings = loadLipSyncSettings();
+	statusDiv.textContent = "生成中...";
+	statusDiv.style.color = "#eeeeee";
+	statusDiv.style.fontWeight = "normal";
+
+	csInterface.evalScript('generateLipSync(' + JSON.stringify(JSON.stringify(settings)) + ')', function (res) {
+		var data;
+		try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
+
+		if (data.status !== 'success') {
+			statusDiv.textContent = data.message;
+			statusDiv.style.color = "#ff4444";
+			statusDiv.style.fontWeight = "bold";
+			return;
+		}
+
+		var okCount = 0;
+		var lines = [];
+		data.results.forEach(function (r) {
+			if (r.status === 'ok') {
+				okCount++;
+			} else {
+				lines.push('・' + r.layer + ': ' + r.message);
+			}
+		});
+		var summary = "口パク生成: " + okCount + "件";
+		if (lines.length > 0) summary += " / 未処理: " + lines.length + "件";
+		statusDiv.textContent = [summary].concat(lines).join('\n');
+		statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okCount > 0 ? "#eebb00" : "#ff4444");
+		statusDiv.style.fontWeight = "bold";
+	});
 }

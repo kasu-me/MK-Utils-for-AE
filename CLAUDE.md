@@ -106,6 +106,11 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 - `g_storedKeyframes` — array of keyframe references collected for move operations
 - Presets stored in localStorage with key: `psdtool_presets_[projectPath]_[compId]`
 
+**LipSync (口パク):**
+- Per-character config is stored in the **comment field of the mouth-variant folder comp** as `"[psdtool_lipsync]" + JSON` (`{ speaker, map: { a, i, u, e, o, n → layer name } }`), so it travels with the .aep (template projects). See `getLipSyncConfigs()` / `saveLipSyncConfig()` in hostscript.jsx.
+- `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex (same convention as ImportSubtitles), finds the mouth comp nested in the active comp, and writes HOLD opacity keys. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
+- Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`.
+
 **Hierarchy node (JSON from backend):**
 ```json
 {
