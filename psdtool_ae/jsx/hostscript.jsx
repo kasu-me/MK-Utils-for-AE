@@ -404,9 +404,9 @@ function removeKeyframesAtCurrentTime(isShift, isSelectedOnly) {
 	try {
 		var counter = { count: 0 };
 		if (selectedLayers) {
-			// 選択レイヤー自身のプロパティのみ対象（プリコンポの中身は対象外）
+			// 選択レイヤーと、プリコンポの場合はその中身を対象
 			for (var i = 0; i < selectedLayers.length; i++) {
-				removeKeysFromLayer(selectedLayers[i], comp.time, counter, isShift);
+				removeKeysFromLayerTree(selectedLayers[i], comp.time, counter, isShift);
 			}
 		} else {
 			removeKeysRecursive(comp, comp.time, counter, isShift);
@@ -432,33 +432,37 @@ function removeKeyframesAtCurrentTime(isShift, isSelectedOnly) {
 
 function removeKeysRecursive(comp, time, counter, isShift) {
 	for (var i = 1; i <= comp.numLayers; i++) {
-		var layer = comp.layer(i);
+		removeKeysFromLayerTree(comp.layer(i), time, counter, isShift);
+	}
+}
 
-		// 現在のレイヤーのプロパティからキーを削除
-		removeKeysFromLayer(layer, time, counter, isShift);
-
-		// If it's a pre-comp, recurse
-		if (layer.source instanceof CompItem) {
-			// Calculate inner time for the pre-comp
-			if (layer.timeRemapEnabled) {
-				// タイムリマップ有効の場合、現在時刻でのタイムリマップ値を取得して再帰
-				var trProp = layer.property("Time Remap");
-				if (trProp) {
-					var mappedTime = trProp.valueAtTime(time, false);
-					removeKeysRecursive(layer.source, mappedTime, counter, isShift);
-				}
-			} else {
-				// 通常の時間計算
-				// comp time -> layer local time -> source comp time
-				// localTime = (compTime - startTime) * stretchFactor
-				// stretch: 100 means 100% speed. stretch 200 means 50% speed (2x duration).
-				// AE Scripting Guide: layer.stretch is a percentage.
-				// But formula is specific.
-				// Correct formula: (time - layer.startTime) * (100 / layer.stretch)
-				var localTime = (time - layer.startTime) * (100 / layer.stretch);
-				removeKeysRecursive(layer.source, localTime, counter, isShift);
+// レイヤー自身のキーを削除し、プリコンポなら中身も再帰的に削除する
+function removeKeysFromLayerTree(layer, time, counter, isShift) {
+	// プリコンポ内の時間を先に計算する
+	// （先に自身のキーを消すとタイムリマップの値が変わってしまうため）
+	var innerTime = null;
+	if (layer.source instanceof CompItem) {
+		if (layer.timeRemapEnabled) {
+			// タイムリマップ有効の場合、現在時刻でのタイムリマップ値を使用
+			var trProp = layer.property("Time Remap");
+			if (trProp) {
+				innerTime = trProp.valueAtTime(time, false);
 			}
+		} else {
+			// 通常の時間計算
+			// comp time -> layer local time -> source comp time
+			// stretch: 100 means 100% speed. stretch 200 means 50% speed (2x duration).
+			// Correct formula: (time - layer.startTime) * (100 / layer.stretch)
+			innerTime = (time - layer.startTime) * (100 / layer.stretch);
 		}
+	}
+
+	// 現在のレイヤーのプロパティからキーを削除
+	removeKeysFromLayer(layer, time, counter, isShift);
+
+	// If it's a pre-comp, recurse
+	if (innerTime !== null) {
+		removeKeysRecursive(layer.source, innerTime, counter, isShift);
 	}
 }
 
