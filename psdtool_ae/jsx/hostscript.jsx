@@ -1405,3 +1405,175 @@ function lipSyncWriteJob(job) {
 	job.result.message = segs.length + "区間";
 }
 
+// ---------------------------------------------------------
+// 無音カット
+// ---------------------------------------------------------
+// WAV の解析はパネル側 (main.js) で行い、ここでは有音区間に合わせてレイヤーのイン/アウトを切り詰める。
+// ソースファイルは変更しないため、lab (口パク) や txt (字幕) との対応はそのまま保たれる。
+
+var SILENCE_EPS = 0.0001;
+
+// 無音カットできないレイヤーなら理由を返す
+function silenceCutCheckLayer(layer) {
+	if (!(layer instanceof AVLayer) || !(layer.source instanceof FootageItem) || !layer.source.mainSource || !layer.source.mainSource.file) {
+		return "音声ファイルのレイヤーではありません";
+	}
+	if (!layer.hasAudio) return "音声がありません";
+	if (layer.locked) return "ロックされています";
+	if (layer.timeRemapEnabled) return "タイムリマップが有効なレイヤーには未対応です";
+	if (layer.stretch <= 0) return "逆再生のレイヤーには未対応です";
+	return null;
+}
+
+// 選択中のレイヤーと音声ファイルのパスを返す (パネル側で WAV を解析するため)
+function getSelectedAudioLayers() {
+	var comp = app.project.activeItem;
+	if (!comp || !(comp instanceof CompItem)) {
+		return JSON.stringify({ status: "error", message: "コンポジションを選択してから実行してください。" });
+	}
+	if (comp.selectedLayers.length === 0) {
+		return JSON.stringify({ status: "error", message: "対象の音声レイヤーを選択してください。" });
+	}
+	var layers = [];
+	var selected = comp.selectedLayers;
+	for (var i = 0; i < selected.length; i++) {
+		var layer = selected[i];
+		var entry = { index: layer.index, name: layer.name };
+		var reason = silenceCutCheckLayer(layer);
+		if (reason) {
+			entry.message = reason;
+		} else {
+			entry.path = layer.source.mainSource.file.fsName;
+		}
+		layers.push(entry);
+	}
+	return JSON.stringify({ status: "success", compId: comp.id, layers: layers });
+}
+
+function silenceCutSetRange(layer, t0, t1) {
+	// 新しいインが現在のアウト以降だとイン > アウトになるため、先にアウトを動かす
+	if (t0 < layer.outPoint) {
+		layer.inPoint = t0;
+		layer.outPoint = t1;
+	} else {
+		layer.outPoint = t1;
+		layer.inPoint = t0;
+	}
+}
+
+// optionsStr: { compId, ripple, items: [{ index, path, ranges: [[start, end], ...] (ファイル先頭からの秒) }] }
+function applySilenceCut(optionsStr) {
+	var opt;
+	try {
+		opt = JSON.parse(optionsStr);
+	} catch (e) {
+		return JSON.stringify({ status: "error", message: "設定が正しくありません: " + e.toString() });
+	}
+	var comp = getCompById(opt.compId);
+	if (!comp) return JSON.stringify({ status: "error", message: "コンポジションが見つかりません" });
+
+	// 複製でインデックスがずれるため、先に対象レイヤーをすべて確定させる。
+	// 解析中にレイヤー順などが変わっていたら何もしない
+	var targets = [];
+	for (var i = 0; i < opt.items.length; i++) {
+		var item = opt.items[i];
+		var layer = item.index <= comp.numLayers ? comp.layer(item.index) : null;
+		if (!layer || silenceCutCheckLayer(layer) || layer.source.mainSource.file.fsName !== item.path) {
+			return JSON.stringify({ status: "error", message: "解析中にレイヤーが変更されました。もう一度実行してください。" });
+		}
+		targets.push({ layer: layer, ranges: item.ranges, result: { layer: layer.name } });
+	}
+
+	var results = [];
+	var pieces = [];
+	app.beginUndoGroup("無音カット");
+	try {
+		for (var t = 0; t < targets.length; t++) {
+			try {
+				silenceCutLayer(comp, targets[t], pieces);
+			} catch (e) {
+				targets[t].result.status = "error";
+				targets[t].result.message = e.toString() + " (Line: " + e.line + ")";
+			}
+			results.push(targets[t].result);
+		}
+		if (opt.ripple) silenceCutRipple(comp, pieces);
+	} finally {
+		app.endUndoGroup();
+	}
+	return JSON.stringify({ status: "success", results: results });
+}
+
+// 有音区間ごとにレイヤーを分け (2 区間目以降は複製)、イン/アウトをフレーム単位で区間に合わせる
+function silenceCutLayer(comp, target, pieces) {
+	var layer = target.layer;
+	var result = target.result;
+	var fd = comp.frameDuration;
+	var inFrame = Math.round(layer.inPoint / fd);
+	var outFrame = Math.round(layer.outPoint / fd);
+	var toComp = function (sec) {
+		return (layer.startTime + sec * layer.stretch / 100) / fd;
+	};
+
+	// 有音側に広げてフレームに丸め、現在のイン/アウトの範囲内に切り詰める
+	var spans = [];
+	for (var i = 0; i < target.ranges.length; i++) {
+		var f0 = Math.max(Math.floor(toComp(target.ranges[i][0]) + SILENCE_EPS), inFrame);
+		var f1 = Math.min(Math.ceil(toComp(target.ranges[i][1]) - SILENCE_EPS), outFrame);
+		if (f1 <= f0) continue;
+		var last = spans[spans.length - 1];
+		if (last && f0 <= last.f1) {
+			last.f1 = Math.max(last.f1, f1);
+		} else {
+			spans.push({ f0: f0, f1: f1 });
+		}
+	}
+	if (spans.length === 0) {
+		result.status = "skip";
+		result.message = "有音部分が見つかりません";
+		return;
+	}
+
+	var layers = [layer];
+	for (var d = 1; d < spans.length; d++) {
+		var dup = layer.duplicate();
+		dup.moveAfter(layers[layers.length - 1]);
+		layers.push(dup);
+	}
+
+	// 音声の開始がフレームの途中にある場合、フレームに丸めた端がソースの外に出ないようにする
+	var srcStart = layer.startTime;
+	var srcEnd = layer.startTime + layer.source.duration * layer.stretch / 100;
+	var kept = 0;
+	for (var k = 0; k < spans.length; k++) {
+		silenceCutSetRange(layers[k], Math.max(spans[k].f0 * fd, srcStart), Math.min(spans[k].f1 * fd, srcEnd));
+		layers[k].selected = true;
+		pieces.push({ layer: layers[k], f0: spans[k].f0, f1: spans[k].f1 });
+		kept += spans[k].f1 - spans[k].f0;
+	}
+
+	var cutSec = Math.max(0, outFrame - inFrame - kept) * fd;
+	result.status = "ok";
+	result.message = (spans.length > 1 ? spans.length + "分割, " : "") + cutSec.toFixed(2) + "秒カット";
+}
+
+// 処理したレイヤー全体で、どれも鳴っていない区間を詰める。
+// 各レイヤーは自分より前にある隙間の合計だけ前へ移動する (重なっている音声同士の関係は保たれる)
+function silenceCutRipple(comp, pieces) {
+	var sorted = pieces.slice().sort(function (a, b) { return a.f0 - b.f0; });
+	var gaps = [];
+	var reach = null;
+	for (var i = 0; i < sorted.length; i++) {
+		if (reach !== null && sorted[i].f0 > reach) gaps.push({ end: sorted[i].f0, len: sorted[i].f0 - reach });
+		reach = reach === null ? sorted[i].f1 : Math.max(reach, sorted[i].f1);
+	}
+
+	for (var p = 0; p < pieces.length; p++) {
+		var shift = 0;
+		for (var g = 0; g < gaps.length; g++) {
+			if (gaps[g].end <= pieces[p].f0) shift += gaps[g].len;
+		}
+		if (shift > 0) pieces[p].layer.startTime -= shift * comp.frameDuration;
+	}
+}
+

@@ -349,21 +349,24 @@ input[type="radio"] {
 }
 
 /* LipSync */
-#status-lipsync {
+#status-lipsync,
+#status-silence {
 	color: #888;
 	font-size: 0.9em;
 	min-height: 1.2em;
 	white-space: pre-line;
 }
 
-#lipsync-modal .modal-content {
+#lipsync-modal .modal-content,
+#silence-modal .modal-content {
 	margin: 5% auto;
 	width: 90%;
 	max-height: 90%;
 	box-sizing: border-box;
 }
 
-#lipsync-modal-body {
+#lipsync-modal-body,
+#silence-modal-body {
 	overflow-y: auto;
 	flex: 1;
 }
@@ -392,7 +395,8 @@ input[type="radio"] {
 
 #lipsync-modal input[type="text"],
 #lipsync-modal input[type="number"],
-#lipsync-modal select {
+#lipsync-modal select,
+#silence-modal input[type="number"] {
 	background-color: rgba(0, 0, 0, 0.2);
 	color: var(--btn-fg);
 	border: 1px solid var(--btn-border);
@@ -464,6 +468,26 @@ input[type="radio"] {
 .lipsync-add-row button {
 	flex-shrink: 0;
 	white-space: nowrap;
+}
+
+/* Silence Cut */
+.silence-check {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 6px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.silence-check input {
+	margin: 0;
+}
+
+.silence-note {
+	color: #888;
+	font-size: 11px;
+	margin: 10px 0 0;
 }
 
 #btn-move-keys:disabled {

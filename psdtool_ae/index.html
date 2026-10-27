@@ -32,6 +32,16 @@
 			</div>
 			<div id="status-lipsync"></div>
 		</div>
+
+		<!-- Silence Cut Controls -->
+		<div class="silence-section" style="margin-top: 10px;">
+			<div class="section-label" style="font-weight:600; margin-bottom:6px;">無音カット</div>
+			<div style="display: flex; gap: 5px; align-items: center;">
+				<button id="btn-silence-settings" style="flex: 1;">無音カット設定</button>
+				<button id="btn-silence-cut" style="flex: 2;" title="選択した音声レイヤー(WAV)の無音部分に合わせてイン/アウトを切り詰める&#10;元のファイルは変更しません">選択音声の無音カット</button>
+			</div>
+			<div id="status-silence"></div>
+		</div>
 	</div>
 
 	<div id="main-area">
@@ -102,6 +112,41 @@
 						<select id="lipsync-candidate"></select>
 						<button id="btn-lipsync-add">追加</button>
 					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Silence Cut Settings Modal -->
+		<div id="silence-modal" class="modal">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h3>無音カット設定</h3>
+					<span class="close-modal" id="silence-modal-close">&times;</span>
+				</div>
+				<div id="silence-modal-body">
+					<div class="lipsync-group-label">判定</div>
+					<div class="lipsync-field-row">
+						<div class="lipsync-field">
+							<label for="silence-threshold">無音とみなす音量 (dB)</label>
+							<input type="number" id="silence-threshold" min="-90" max="0" step="1">
+						</div>
+						<div class="lipsync-field">
+							<label for="silence-padding">前後に残す余白 (ms)</label>
+							<input type="number" id="silence-padding" min="0" max="2000" step="10">
+						</div>
+					</div>
+
+					<div class="lipsync-group-label">途中の無音</div>
+					<label class="silence-check"><input type="checkbox" id="silence-split">途中の無音でレイヤーを分割する</label>
+					<div class="lipsync-field">
+						<label for="silence-min-gap">分割する無音の最短の長さ (ms)</label>
+						<input type="number" id="silence-min-gap" min="50" max="10000" step="50">
+					</div>
+
+					<div class="lipsync-group-label">配置</div>
+					<label class="silence-check"><input type="checkbox" id="silence-ripple">カットした隙間を詰める (選択した音声レイヤーのみ移動)</label>
+
+					<p class="silence-note">元のWAVファイルは変更せず、レイヤーのイン/アウトだけを切り詰めます。口パク・字幕の生成より前に実行してください。</p>
 				</div>
 			</div>
 		</div>

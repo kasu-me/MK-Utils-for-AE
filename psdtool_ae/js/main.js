@@ -35,6 +35,14 @@ document.getElementById('lipsync-modal-close').addEventListener('click', closeLi
 	document.getElementById(id).addEventListener('change', saveLipSyncSettingsFromForm);
 });
 
+// Silence Cut Events
+document.getElementById('btn-silence-settings').addEventListener('click', openSilenceModal);
+document.getElementById('btn-silence-cut').addEventListener('click', cutSilence);
+document.getElementById('silence-modal-close').addEventListener('click', closeSilenceModal);
+['silence-threshold', 'silence-padding', 'silence-split', 'silence-min-gap', 'silence-ripple'].forEach(function (id) {
+	document.getElementById(id).addEventListener('change', saveSilenceSettingsFromForm);
+});
+
 // 初期状態: moveボタンは無効化
 var btnMoveKeys = document.getElementById('btn-move-keys');
 if (btnMoveKeys) btnMoveKeys.disabled = true;
@@ -159,6 +167,9 @@ window.onclick = function (event) {
 	}
 	if (event.target == document.getElementById("lipsync-modal")) {
 		closeLipSyncModal();
+	}
+	if (event.target == document.getElementById("silence-modal")) {
+		closeSilenceModal();
 	}
 }
 
@@ -1444,5 +1455,225 @@ function generateLipSync() {
 		statusDiv.textContent = [summary].concat(lines).join('\n');
 		statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okCount > 0 ? "#eebb00" : "#ff4444");
 		statusDiv.style.fontWeight = "bold";
+	});
+}
+
+// ------ Silence Cut ------
+
+var SILENCE_SETTINGS_KEY = 'psdtool_silence_settings';
+var SILENCE_WINDOW_SEC = 0.01;    // 音量を測る窓の長さ
+var SILENCE_BRIDGE_SEC = 0.05;    // これより短い音量の落ち込みは発話の一部とみなす
+var SILENCE_MIN_VOICE_SEC = 0.05; // これより短い有音 (クリックノイズなど) は無視する
+
+function loadSilenceSettings() {
+	var settings = { thresholdDb: -50, paddingMs: 100, split: false, minGapMs: 500, ripple: false };
+	try {
+		var saved = JSON.parse(localStorage.getItem(SILENCE_SETTINGS_KEY));
+		if (saved) {
+			Object.keys(settings).forEach(function (key) {
+				if (typeof saved[key] === typeof settings[key]) settings[key] = saved[key];
+			});
+		}
+	} catch (e) { }
+	return settings;
+}
+
+function saveSilenceSettingsFromForm() {
+	var threshold = parseFloat(document.getElementById('silence-threshold').value);
+	var padding = parseInt(document.getElementById('silence-padding').value, 10);
+	var minGap = parseInt(document.getElementById('silence-min-gap').value, 10);
+	var split = document.getElementById('silence-split').checked;
+	localStorage.setItem(SILENCE_SETTINGS_KEY, JSON.stringify({
+		thresholdDb: isNaN(threshold) ? -50 : Math.min(threshold, 0),
+		paddingMs: isNaN(padding) || padding < 0 ? 0 : padding,
+		split: split,
+		minGapMs: isNaN(minGap) || minGap < 50 ? 50 : minGap,
+		ripple: document.getElementById('silence-ripple').checked
+	}));
+	document.getElementById('silence-min-gap').disabled = !split;
+}
+
+function openSilenceModal() {
+	var settings = loadSilenceSettings();
+	document.getElementById('silence-threshold').value = settings.thresholdDb;
+	document.getElementById('silence-padding').value = settings.paddingMs;
+	document.getElementById('silence-split').checked = settings.split;
+	document.getElementById('silence-min-gap').value = settings.minGapMs;
+	document.getElementById('silence-min-gap').disabled = !settings.split;
+	document.getElementById('silence-ripple').checked = settings.ripple;
+	document.getElementById('silence-modal').style.display = 'block';
+}
+
+function closeSilenceModal() {
+	document.getElementById('silence-modal').style.display = 'none';
+}
+
+// WAV ファイルを読み込み、窓ごとの音量 (全チャンネルの RMS, dBFS) を返す
+function readWavLevels(path) {
+	var res = window.cep.fs.readFile(path, window.cep.encoding.Base64);
+	if (res.err !== 0) throw new Error('ファイルを読み込めません (エラー ' + res.err + ')');
+	var bin = atob(res.data);
+	var bytes = new Uint8Array(bin.length);
+	for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+	var view = new DataView(bytes.buffer);
+
+	var tag = function (pos) {
+		return String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]);
+	};
+	if (bytes.length < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('WAVファイルではありません');
+
+	var fmt = null;
+	var dataPos = -1;
+	var dataSize = 0;
+	for (var pos = 12; pos + 8 <= bytes.length;) {
+		var id = tag(pos);
+		var size = view.getUint32(pos + 4, true);
+		var body = pos + 8;
+		if (id === 'fmt ') {
+			fmt = {
+				format: view.getUint16(body, true),
+				channels: view.getUint16(body + 2, true),
+				sampleRate: view.getUint32(body + 4, true),
+				bits: view.getUint16(body + 14, true)
+			};
+			// WAVE_FORMAT_EXTENSIBLE は SubFormat の先頭 2 バイトが実際の形式
+			if (fmt.format === 0xFFFE && size >= 26) fmt.format = view.getUint16(body + 24, true);
+		} else if (id === 'data') {
+			dataPos = body;
+			dataSize = Math.min(size, bytes.length - body);
+			break;
+		}
+		pos = body + size + (size & 1);
+	}
+	if (!fmt || dataPos < 0 || fmt.channels === 0) throw new Error('WAVファイルの形式が正しくありません');
+
+	var read;
+	if (fmt.format === 1 && fmt.bits === 8) read = function (p) { return (bytes[p] - 128) / 128; };
+	else if (fmt.format === 1 && fmt.bits === 16) read = function (p) { return view.getInt16(p, true) / 32768; };
+	else if (fmt.format === 1 && fmt.bits === 24) read = function (p) { return ((view.getInt8(p + 2) << 16) | (bytes[p + 1] << 8) | bytes[p]) / 8388608; };
+	else if (fmt.format === 1 && fmt.bits === 32) read = function (p) { return view.getInt32(p, true) / 2147483648; };
+	else if (fmt.format === 3 && fmt.bits === 32) read = function (p) { return view.getFloat32(p, true); };
+	else if (fmt.format === 3 && fmt.bits === 64) read = function (p) { return view.getFloat64(p, true); };
+	else throw new Error('未対応のWAV形式です (format ' + fmt.format + ', ' + fmt.bits + 'bit)');
+
+	var bytesPerSample = fmt.bits / 8;
+	var blockAlign = fmt.channels * bytesPerSample;
+	var frameCount = Math.floor(dataSize / blockAlign);
+	var win = Math.max(1, Math.round(fmt.sampleRate * SILENCE_WINDOW_SEC));
+	var db = new Float32Array(Math.ceil(frameCount / win));
+	for (var w = 0; w < db.length; w++) {
+		var f0 = w * win;
+		var f1 = Math.min(f0 + win, frameCount);
+		var sum = 0;
+		for (var p = dataPos + f0 * blockAlign, end = dataPos + f1 * blockAlign; p < end; p += bytesPerSample) {
+			var v = read(p);
+			sum += v * v;
+		}
+		db[w] = 10 * Math.log10(sum / ((f1 - f0) * fmt.channels));
+	}
+	return { db: db, windowSec: win / fmt.sampleRate, duration: frameCount / fmt.sampleRate };
+}
+
+// 間隔が maxGap 未満の区間同士を結合する
+function mergeRanges(ranges, maxGap) {
+	var merged = [];
+	ranges.forEach(function (r) {
+		var last = merged[merged.length - 1];
+		if (last && r[0] - last[1] < maxGap) {
+			last[1] = Math.max(last[1], r[1]);
+		} else {
+			merged.push([r[0], r[1]]);
+		}
+	});
+	return merged;
+}
+
+// 残す区間 [[start, end], ...] (ファイル先頭からの秒) を求める
+function detectVoicedRanges(levels, settings) {
+	var win = levels.windowSec;
+	var runs = [];
+	var start = -1;
+	for (var i = 0; i <= levels.db.length; i++) {
+		var loud = i < levels.db.length && levels.db[i] > settings.thresholdDb;
+		if (loud && start < 0) start = i;
+		if (!loud && start >= 0) {
+			runs.push([start * win, Math.min(i * win, levels.duration)]);
+			start = -1;
+		}
+	}
+
+	// 発話中の短い落ち込みをつなげてから、孤立した短いノイズを除く
+	runs = mergeRanges(runs, SILENCE_BRIDGE_SEC).filter(function (r) {
+		return r[1] - r[0] >= SILENCE_MIN_VOICE_SEC;
+	});
+	// 分割しない場合は全体を 1 区間にまとめる (先頭と末尾だけを削る)
+	runs = mergeRanges(runs, settings.split ? settings.minGapMs / 1000 : Infinity);
+
+	var pad = settings.paddingMs / 1000;
+	return mergeRanges(runs.map(function (r) {
+		return [Math.max(0, r[0] - pad), Math.min(levels.duration, r[1] + pad)];
+	}), 0);
+}
+
+function cutSilence() {
+	var statusDiv = document.getElementById('status-silence');
+	var settings = loadSilenceSettings();
+	var showError = function (message) {
+		statusDiv.textContent = message;
+		statusDiv.style.color = "#ff4444";
+		statusDiv.style.fontWeight = "bold";
+	};
+	statusDiv.textContent = "解析中...";
+	statusDiv.style.color = "#eeeeee";
+	statusDiv.style.fontWeight = "normal";
+
+	csInterface.evalScript('getSelectedAudioLayers()', function (res) {
+		var data;
+		try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
+		if (data.status !== 'success') {
+			showError(data.message);
+			return;
+		}
+
+		// 同じファイルを使うレイヤーが複数あっても解析は 1 回
+		var levelsByPath = {};
+		var items = [];
+		var lines = [];
+		data.layers.forEach(function (layer) {
+			if (layer.message) {
+				lines.push('・' + layer.name + ': ' + layer.message);
+				return;
+			}
+			try {
+				if (!levelsByPath[layer.path]) levelsByPath[layer.path] = readWavLevels(layer.path);
+				items.push({ index: layer.index, path: layer.path, ranges: detectVoicedRanges(levelsByPath[layer.path], settings) });
+			} catch (e) {
+				lines.push('・' + layer.name + ': ' + e.message);
+			}
+		});
+		if (items.length === 0) {
+			showError(["無音カット: 0件"].concat(lines).join('\n'));
+			return;
+		}
+
+		var opt = { compId: data.compId, ripple: settings.ripple, items: items };
+		csInterface.evalScript('applySilenceCut(' + JSON.stringify(JSON.stringify(opt)) + ')', function (res2) {
+			var result;
+			try { result = JSON.parse(res2); } catch (e) { result = { status: 'error', message: res2 }; }
+			if (result.status !== 'success') {
+				showError(result.message);
+				return;
+			}
+
+			var okLines = [];
+			result.results.forEach(function (r) {
+				(r.status === 'ok' ? okLines : lines).push('・' + r.layer + ': ' + r.message);
+			});
+			var summary = "無音カット: " + okLines.length + "件";
+			if (lines.length > 0) summary += " / 未処理: " + lines.length + "件";
+			statusDiv.textContent = [summary].concat(okLines, lines).join('\n');
+			statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okLines.length > 0 ? "#eebb00" : "#ff4444");
+			statusDiv.style.fontWeight = "bold";
+		});
 	});
 }

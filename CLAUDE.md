@@ -111,6 +111,11 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 - `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex (same convention as ImportSubtitles), finds the mouth comp nested in the active comp, and writes HOLD opacity keys. Regeneration only clears keys inside each selected audio's visible range (in/out point shifted by lead frames), processed in start-time order so a later clip wins; leftovers outside that range are left as-is. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
 - Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`.
 
+**Silence Cut (無音カット):**
+- Non-destructive: the WAV file is never rewritten; only the selected audio layers' in/out points are trimmed (frame-aligned), so `.lab` / `.txt` alignment (which uses `startTime` / `inPoint`) stays valid.
+- WAV decoding and silence detection run in the **panel** (`readWavLevels()` / `detectVoicedRanges()` in main.js, via `window.cep.fs.readFile` Base64) because ExtendScript binary reads are too slow. Supports PCM 8/16/24/32bit and float 32/64bit (incl. WAVE_FORMAT_EXTENSIBLE). Flow: `getSelectedAudioLayers()` → panel analysis → `applySilenceCut()`.
+- Options: split at mid silences (duplicates the layer per voiced span) and ripple (closes gaps where none of the processed layers is voiced; only processed layers move). Settings in localStorage key `psdtool_silence_settings`.
+
 **Hierarchy node (JSON from backend):**
 ```json
 {
