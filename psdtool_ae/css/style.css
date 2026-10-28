@@ -479,6 +479,81 @@ input[type="radio"] {
 	margin-bottom: 6px;
 }
 
+/* サムネイル付きプルダウン (口差分の選択) */
+.thumb-select {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	background-color: rgba(0, 0, 0, 0.2);
+	color: var(--btn-fg);
+	border: 1px solid var(--btn-border);
+	padding: 2px 4px;
+	font-size: 12px;
+	min-width: 0;
+	min-height: 22px;
+	box-sizing: border-box;
+	cursor: default;
+	outline: none;
+	user-select: none;
+}
+
+.thumb-select::after {
+	content: "▾";
+	margin-left: auto;
+	padding-left: 4px;
+	color: #888;
+}
+
+.thumb-select:focus,
+.thumb-select.open {
+	border-color: #888;
+}
+
+.thumb-select-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.thumb-select-icon {
+	flex: 0 0 auto;
+	width: 24px;
+	height: 24px;
+}
+
+.thumb-select .thumb-select-icon {
+	width: 16px;
+	height: 16px;
+}
+
+.thumb-select-list {
+	position: fixed;
+	z-index: 200;
+	overflow-y: auto;
+	box-sizing: border-box;
+	background-color: var(--btn-bg);
+	color: var(--btn-fg);
+	border: 1px solid var(--btn-border);
+	box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.4);
+	font-size: 12px;
+	user-select: none;
+}
+
+.thumb-select-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 6px;
+	white-space: nowrap;
+}
+
+.thumb-select-item.active {
+	background-color: #2680eb;
+	color: #fff;
+}
+
 .lipsync-actions {
 	display: flex;
 	justify-content: flex-end;

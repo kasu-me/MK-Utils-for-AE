@@ -480,6 +480,7 @@ function renderTree(data) {
 	});
 
 	container.appendChild(rootUl);
+	g_thumbRoot = rootThumb;
 	loadThumbnails(rootThumb);
 }
 
@@ -681,6 +682,7 @@ function createNode(item, parentCompId, depth, parentVisible, parentThumb) {
 // フォルダは、配下で現在表示中のレイヤーを重ねた画像 (クリッピングを考慮) を表示する。
 var THUMB_SETTINGS_KEY = 'psdtool_show_thumbnails';
 var g_thumbGen = 0; // 再描画のたびに増やし、古い読み込み結果を捨てる
+var g_thumbRoot = null; // 現在のツリーのサムネイル用ノード (口パク設定のプルダウンからも参照する)
 
 function isThumbnailEnabled() {
 	try {
@@ -771,11 +773,7 @@ function applyThumbnails(rootThumb, psds) {
 		node.psdLayer = matchPsdLayer(node, psd, counters);
 		var src = node.psdLayer && node.psdLayer.canvas;
 		if (!src) return;
-		var canvas = document.createElement('canvas');
-		canvas.width = src.width;
-		canvas.height = src.height;
-		canvas.getContext('2d').drawImage(src, 0, 0);
-		setThumbCanvas(node, canvas);
+		setThumbCanvas(node, copyThumbCanvas(src));
 	});
 
 	var walkFolders = function (node) {
@@ -786,6 +784,15 @@ function applyThumbnails(rootThumb, psds) {
 		});
 	};
 	walkFolders(rootThumb);
+}
+
+function copyThumbCanvas(src) {
+	var canvas = document.createElement('canvas');
+	canvas.width = src.width;
+	canvas.height = src.height;
+	canvas.getContext('2d').drawImage(src, 0, 0);
+	canvas.className = 'layer-thumb';
+	return canvas;
 }
 
 function setThumbCanvas(node, canvas) {
@@ -1463,6 +1470,7 @@ function closeLipSyncModal() {
 	if (unsaved.length > 0 && !confirm('保存されていない設定があります。閉じてもよろしいですか？')) {
 		return;
 	}
+	if (g_thumbSelectClose) g_thumbSelectClose();
 	document.getElementById('lipsync-modal').style.display = 'none';
 }
 
@@ -1547,6 +1555,229 @@ function addLipSyncCandidate() {
 	card.querySelector('input').focus();
 }
 
+function findThumbFolder(node, compId) {
+	if (!node) return null;
+	for (var i = 0; i < node.children.length; i++) {
+		var c = node.children[i];
+		if (c.item.type !== 'folder') continue;
+		if (String(c.item.compId) === String(compId)) return c;
+		var found = findThumbFolder(c, compId);
+		if (found) return found;
+	}
+	return null;
+}
+
+// 口差分コンポ内のレイヤーのサムネイル。ツリーに無い・読み込み前なら null
+function getLipSyncLayerThumb(compId, name) {
+	if (!name) return null;
+	var folder = findThumbFolder(g_thumbRoot, compId);
+	if (!folder) return null;
+	for (var i = 0; i < folder.children.length; i++) {
+		if (folder.children[i].item.name === name) return folder.children[i].thumbCanvas || null;
+	}
+	return null;
+}
+
+// ===== サムネイル付きプルダウン =====
+// ネイティブの <select> は選択肢にマウスイベントが来ずプレビューを出せないので、自前で描く。
+// 戻り値の要素は select と同じく .value で値を読み書きできる
+var g_thumbSelectClose = null; // 開いているリストを閉じる関数
+
+function createThumbSelect(names, getThumb, onChange) {
+	var options = [{ value: '', label: '(未選択)' }].concat(names.map(function (n) {
+		return { value: n, label: n };
+	}));
+	var current = '';
+
+	var root = document.createElement('div');
+	root.className = 'thumb-select';
+	root.tabIndex = 0;
+
+	var makeIcon = function (src) {
+		var icon = document.createElement('span');
+		icon.className = 'thumb-select-icon';
+		if (src) icon.appendChild(copyThumbCanvas(src));
+		return icon;
+	};
+
+	var render = function () {
+		root.innerHTML = '';
+		var src = getThumb(current);
+		if (src) root.appendChild(makeIcon(src));
+		var label = document.createElement('span');
+		label.className = 'thumb-select-label';
+		label.textContent = current || '(未選択)';
+		root.appendChild(label);
+	};
+
+	var indexOfValue = function (v) {
+		for (var i = 0; i < options.length; i++) {
+			if (options[i].value === v) return i;
+		}
+		return 0;
+	};
+
+	var choose = function (v) {
+		if (v === current) return;
+		current = v;
+		render();
+		onChange();
+	};
+
+	// 開いている間だけ有効
+	var list = null;
+	var items = [];
+	var active = 0;
+
+	var setActive = function (i) {
+		if (items[active]) items[active].classList.remove('active');
+		active = Math.max(0, Math.min(items.length - 1, i));
+		items[active].classList.add('active');
+	};
+
+	var close = function () {
+		if (!list) return;
+		document.removeEventListener('mousedown', onOutside, true);
+		document.removeEventListener('scroll', onScroll, true);
+		window.removeEventListener('resize', close);
+		list.parentNode.removeChild(list);
+		list = null;
+		items = [];
+		root.classList.remove('open');
+		hideThumbPreview();
+		if (g_thumbSelectClose === close) g_thumbSelectClose = null;
+	};
+
+	var onOutside = function (e) {
+		if (!list.contains(e.target) && !root.contains(e.target)) close();
+	};
+
+	var onScroll = function (e) {
+		if (!list.contains(e.target)) close();
+	};
+
+	var open = function () {
+		if (g_thumbSelectClose) g_thumbSelectClose();
+		hideThumbPreview();
+		render(); // カードを作ったあとに読み込み終わったサムネイルを反映する
+
+		list = document.createElement('div');
+		list.className = 'thumb-select-list';
+		var thumbs = options.map(function (o) { return getThumb(o.value); });
+		var hasThumb = thumbs.some(function (t) { return !!t; });
+		options.forEach(function (o, i) {
+			var item = document.createElement('div');
+			item.className = 'thumb-select-item';
+			var src = thumbs[i];
+			if (hasThumb) item.appendChild(makeIcon(src));
+			var label = document.createElement('span');
+			label.className = 'thumb-select-label';
+			label.textContent = o.label;
+			item.appendChild(label);
+
+			item.addEventListener('mouseenter', function (e) {
+				setActive(i);
+				showThumbPreview(src, e);
+			});
+			item.addEventListener('mousemove', moveThumbPreview);
+			item.addEventListener('mouseleave', hideThumbPreview);
+			item.addEventListener('mousedown', function (e) {
+				e.preventDefault(); // フォーカスを root に残す
+			});
+			// 押したままドラッグして離しても選べるよう mouseup で確定する。
+			// すぐ消すと続く click がモーダルの背景に飛んでモーダルが閉じることがあるので、消すのは後で
+			item.addEventListener('mouseup', function (e) {
+				if (e.button !== 0) return;
+				choose(o.value);
+				setTimeout(close, 0);
+			});
+			list.appendChild(item);
+			items.push(item);
+		});
+		document.body.appendChild(list);
+
+		// 下に収まらず上の方が広ければ上に開く
+		var r = root.getBoundingClientRect();
+		var below = window.innerHeight - r.bottom - 4;
+		var above = r.top - 4;
+		list.style.minWidth = r.width + 'px';
+		if (list.offsetHeight > below && above > below) {
+			list.style.maxHeight = above + 'px';
+			list.style.bottom = (window.innerHeight - r.top) + 'px';
+		} else {
+			list.style.maxHeight = below + 'px';
+			list.style.top = r.bottom + 'px';
+		}
+		list.style.left = Math.max(0, Math.min(r.left, window.innerWidth - list.offsetWidth)) + 'px';
+
+		setActive(indexOfValue(current));
+		items[active].scrollIntoView({ block: 'nearest' });
+		root.classList.add('open');
+
+		document.addEventListener('mousedown', onOutside, true);
+		document.addEventListener('scroll', onScroll, true);
+		window.addEventListener('resize', close);
+		g_thumbSelectClose = close;
+	};
+
+	root.addEventListener('mousedown', function (e) {
+		if (e.button !== 0) return;
+		if (list) close();
+		else open();
+	});
+
+	root.addEventListener('keydown', function (e) {
+		var key = e.key;
+		if (list) {
+			if (key === 'ArrowDown' || key === 'ArrowUp') {
+				setActive(active + (key === 'ArrowDown' ? 1 : -1));
+				items[active].scrollIntoView({ block: 'nearest' });
+				var src = getThumb(options[active].value);
+				var r = items[active].getBoundingClientRect();
+				if (src) showThumbPreview(src, { clientX: r.right, clientY: r.top + r.height / 2 });
+				else hideThumbPreview();
+			} else if (key === 'Enter' || key === ' ') {
+				choose(options[active].value);
+				close();
+			} else if (key === 'Escape' || key === 'Tab') {
+				close();
+				if (key === 'Tab') return;
+			} else {
+				return;
+			}
+		} else {
+			if (key === 'ArrowDown' || key === 'ArrowUp') {
+				var i = indexOfValue(current) + (key === 'ArrowDown' ? 1 : -1);
+				if (i >= 0 && i < options.length) choose(options[i].value);
+			} else if (key === 'Enter' || key === ' ') {
+				open();
+			} else {
+				return;
+			}
+		}
+		e.preventDefault();
+		e.stopPropagation();
+	});
+
+	root.addEventListener('mouseenter', function (e) {
+		if (!list) showThumbPreview(getThumb(current), e);
+	});
+	root.addEventListener('mousemove', moveThumbPreview);
+	root.addEventListener('mouseleave', function () {
+		if (!list) hideThumbPreview();
+	});
+
+	Object.defineProperty(root, 'value', {
+		get: function () { return current; },
+		set: function (v) {
+			current = names.indexOf(v) >= 0 ? v : '';
+			render();
+		}
+	});
+	render();
+	return root;
+}
+
 function createLipSyncCard(compId, title, speaker, map, layerNames, saved) {
 	var card = document.createElement('div');
 	card.className = 'lipsync-card' + (saved ? '' : ' unsaved');
@@ -1578,20 +1809,10 @@ function createLipSyncCard(compId, title, speaker, map, layerNames, saved) {
 	LIPSYNC_SHAPES.forEach(function (shape) {
 		var label = document.createElement('label');
 		label.textContent = shape.label;
-		var select = document.createElement('select');
-
-		var emptyOpt = document.createElement('option');
-		emptyOpt.value = '';
-		emptyOpt.textContent = '(未選択)';
-		select.appendChild(emptyOpt);
-		layerNames.forEach(function (name) {
-			var opt = document.createElement('option');
-			opt.value = name;
-			opt.textContent = name;
-			select.appendChild(opt);
-		});
-		select.value = map[shape.key] && layerNames.indexOf(map[shape.key]) >= 0 ? map[shape.key] : '';
-		select.addEventListener('change', markUnsaved);
+		var select = createThumbSelect(layerNames, function (name) {
+			return getLipSyncLayerThumb(compId, name);
+		}, markUnsaved);
+		select.value = map[shape.key] || '';
 
 		selects[shape.key] = select;
 		mapDiv.appendChild(label);
