@@ -116,6 +116,11 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 - WAV decoding and silence detection run in the **panel** (`readWavLevels()` / `detectVoicedRanges()` in main.js, via `window.cep.fs.readFile` Base64) because ExtendScript binary reads are too slow. Supports PCM 8/16/24/32bit and float 32/64bit (incl. WAVE_FORMAT_EXTENSIBLE). Flow: `getSelectedAudioLayers()` → panel analysis → `applySilenceCut()`.
 - Options: split at mid silences (duplicates the layer per voiced span) and ripple (closes gaps where none of the processed layers is voiced; only processed layers move). Settings in localStorage key `psdtool_silence_settings`.
 
+**Layer Thumbnails:**
+- AE's ExtendScript has no API for getting layer images, so the **panel** reads the source PSD/PSB directly (`js/psdthumb.js`, `PsdThumb.load()`). Supports RGB/Grayscale, 8/16bit, RAW/RLE/ZIP (ZIP needs `DecompressionStream`), and applies layer masks. Blend modes and layer effects are ignored. Per-layer images are downscaled (long side 160px) and cached by path + mtime.
+- `getHierarchy()` adds `psdFile` / `psdName` to PSD-derived footage layers (footage name is `"<PSD layer name>/<file>.psd"`). The panel matches AE nodes to PSD layers by the longest suffix of the name path (AE may have extra parent comps above the PSD comp); duplicates are assigned in top-to-bottom order.
+- Folder thumbnails composite currently-checked descendants (with clipping) and are redrawn on toggle via `refreshFolderThumbs()`. On/off setting in localStorage key `psdtool_show_thumbnails`.
+
 **Hierarchy node (JSON from backend):**
 ```json
 {

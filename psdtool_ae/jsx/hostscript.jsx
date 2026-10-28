@@ -551,10 +551,26 @@ function parseComp(comp) {
 			item.children = parseComp(layer.source);
 		} else {
 			item.type = "layer";
+			// PSD から読み込んだレイヤーなら、サムネイル用に元ファイルと PSD 上のレイヤー名を渡す
+			var psd = getPsdSourceInfo(layer);
+			if (psd) {
+				item.psdFile = psd.file;
+				item.psdName = psd.name;
+			}
 		}
 		children.push(item);
 	}
 	return children;
+}
+
+// PSD の各レイヤーは「レイヤー名/ファイル名.psd」という名前のフッテージになる
+function getPsdSourceInfo(layer) {
+	var src = layer.source;
+	if (!(src instanceof FootageItem) || !(src.mainSource instanceof FileSource) || !src.mainSource.file) return null;
+	var path = src.mainSource.file.fsName;
+	if (!/\.(psd|psb)$/i.test(path)) return null;
+	var slash = src.name.lastIndexOf("/");
+	return { file: path, name: slash > 0 ? src.name.substring(0, slash) : layer.name };
 }
 
 // レイヤーの表示・非表示を切り替える（キーフレーム作成）

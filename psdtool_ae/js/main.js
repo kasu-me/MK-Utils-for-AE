@@ -17,6 +17,7 @@ try {
 
 document.getElementById('btn-reload').addEventListener('click', loadHierarchy);
 document.getElementById('btn-collapse-all').addEventListener('click', collapseAllFolders);
+initThumbnailToggle();
 document.getElementById('btn-add-preset').addEventListener('click', savePreset);
 document.getElementById('btn-export-preset').addEventListener('click', exportPresets);
 document.getElementById('btn-import-preset').addEventListener('click', importPresets);
@@ -470,12 +471,16 @@ function renderTree(data) {
 	var rootUl = document.createElement('ul');
 	rootUl.className = 'tree-root';
 
+	// サムネイル用に、ツリーと同じ形のノード (DOM 参照と AE 上の名前のパス) を作る
+	var rootThumb = { item: null, path: [], parent: null, children: [] };
+
 	// ルートの子要素（実際のレイヤー群）を描画. Depth starts at 1.
 	data.children.forEach(function (child) {
-		rootUl.appendChild(createNode(child, data.id, 1, true));
+		rootUl.appendChild(createNode(child, data.id, 1, true, rootThumb));
 	});
 
 	container.appendChild(rootUl);
+	loadThumbnails(rootThumb);
 }
 
 function getLayerKey(item) {
@@ -486,8 +491,11 @@ function getLayerKey(item) {
 	return "NAME:" + item.name;
 }
 
-function createNode(item, parentCompId, depth, parentVisible) {
+function createNode(item, parentCompId, depth, parentVisible, parentThumb) {
 	var li = document.createElement('li');
+
+	var thumbNode = { item: item, path: parentThumb.path.concat([item.name]), parent: parentThumb, children: [] };
+	parentThumb.children.push(thumbNode);
 
 	var div = document.createElement('div');
 	div.className = 'item-container';
@@ -625,7 +633,9 @@ function createNode(item, parentCompId, depth, parentVisible) {
 
 	input.onclick = function (e) {
 		executeLogic();
+		refreshFolderThumbs(thumbNode.parent);
 	};
+	thumbNode.input = input;
 
 	div.appendChild(input);
 
@@ -638,6 +648,7 @@ function createNode(item, parentCompId, depth, parentVisible) {
 	icon.className = item.type === 'folder' ? 'layer-icon folder-icon' : 'layer-icon';
 	icon.onclick = labelClick;
 	div.appendChild(icon);
+	thumbNode.icon = icon;
 
 	var label = document.createElement('span');
 	label.className = 'layer-name ' + (item.mode === 'locked' ? 'locked' : '');
@@ -657,12 +668,251 @@ function createNode(item, parentCompId, depth, parentVisible) {
 
 		item.children.forEach(function (child) {
 			// 子階層へも isSelfVisibleなどの状態を渡す（現状ではロジックに使っていないが、構造維持）
-			childUl.appendChild(createNode(child, nextCompId, depth + 1, isSelfVisible));
+			childUl.appendChild(createNode(child, nextCompId, depth + 1, isSelfVisible, thumbNode));
 		});
 		li.appendChild(childUl);
 	}
 
 	return li;
+}
+
+// ===== Layer Thumbnails =====
+// PSD 由来のレイヤーは元の PSD を panel 側で解析して縮小画像を表示する。
+// フォルダは、配下で現在表示中のレイヤーを重ねた画像 (クリッピングを考慮) を表示する。
+var THUMB_SETTINGS_KEY = 'psdtool_show_thumbnails';
+var g_thumbGen = 0; // 再描画のたびに増やし、古い読み込み結果を捨てる
+
+function isThumbnailEnabled() {
+	try {
+		return localStorage.getItem(THUMB_SETTINGS_KEY) !== '0';
+	} catch (e) {
+		return true;
+	}
+}
+
+function initThumbnailToggle() {
+	var chk = document.getElementById('chk-thumbnails');
+	chk.checked = isThumbnailEnabled();
+	chk.addEventListener('change', function () {
+		try {
+			localStorage.setItem(THUMB_SETTINGS_KEY, chk.checked ? '1' : '0');
+		} catch (e) { }
+		if (g_lastCompId) loadHierarchy();
+	});
+}
+
+function collectThumbLeaves(node, out) {
+	node.children.forEach(function (c) {
+		if (c.item.type === 'folder') collectThumbLeaves(c, out);
+		else out.push(c);
+	});
+	return out;
+}
+
+function loadThumbnails(rootThumb) {
+	var gen = ++g_thumbGen;
+	var status = document.getElementById('status-thumb');
+	status.textContent = '';
+	hideThumbPreview();
+	if (!isThumbnailEnabled()) return;
+
+	var files = [];
+	collectThumbLeaves(rootThumb, []).forEach(function (n) {
+		if (n.item.psdFile && files.indexOf(n.item.psdFile) < 0) files.push(n.item.psdFile);
+	});
+	PsdThumb.prune(files);
+	if (files.length === 0) return;
+
+	status.textContent = 'サムネイルを読み込み中...';
+	var psds = {};
+	var errors = [];
+	var pending = files.length;
+	files.forEach(function (file) {
+		var fileName = file.replace(/^.*[\\\/]/, '');
+		PsdThumb.load(file).then(function (psd) {
+			psds[file] = psd;
+			if (psd.warning) errors.push(fileName + ': ' + psd.warning);
+		}, function (e) {
+			errors.push(fileName + ': ' + e.message);
+		}).then(function () {
+			if (--pending > 0 || gen !== g_thumbGen) return;
+			applyThumbnails(rootThumb, psds);
+			status.textContent = errors.length ? 'サムネイル: ' + errors.join('\n') : '';
+		});
+	});
+}
+
+// AE のツリーと PSD のレイヤーを、名前のパスで対応付ける。
+// AE 側は PSD のコンポより上の階層を含むことがあるので、パスの末尾が一致する最長のものを探す。
+// 同じパスのレイヤーが複数あるときは、上から順に出てきた順番で割り当てる
+function matchPsdLayer(node, psd, counters) {
+	var names = [node.item.psdName || node.item.name];
+	if (names[0] !== node.item.name) names.push(node.item.name);
+	for (var n = 0; n < names.length; n++) {
+		var path = node.path.slice(0, -1).concat([names[n]]);
+		for (var i = 0; i < path.length; i++) {
+			var key = path.slice(i).join('\u0000');
+			var list = psd.index[key];
+			if (!list) continue;
+			var counterKey = node.item.psdFile + '\u0001' + key;
+			var count = counters[counterKey] || 0;
+			counters[counterKey] = count + 1;
+			return list[count % list.length];
+		}
+	}
+	return null;
+}
+
+function applyThumbnails(rootThumb, psds) {
+	var counters = {};
+	collectThumbLeaves(rootThumb, []).forEach(function (node) {
+		var psd = psds[node.item.psdFile];
+		if (!psd) return;
+		node.psdLayer = matchPsdLayer(node, psd, counters);
+		var src = node.psdLayer && node.psdLayer.canvas;
+		if (!src) return;
+		var canvas = document.createElement('canvas');
+		canvas.width = src.width;
+		canvas.height = src.height;
+		canvas.getContext('2d').drawImage(src, 0, 0);
+		setThumbCanvas(node, canvas);
+	});
+
+	var walkFolders = function (node) {
+		node.children.forEach(function (c) {
+			if (c.item.type !== 'folder') return;
+			walkFolders(c);
+			updateFolderThumb(c);
+		});
+	};
+	walkFolders(rootThumb);
+}
+
+function setThumbCanvas(node, canvas) {
+	if (!node.thumbCanvas) {
+		node.icon.classList.add('has-thumb');
+		node.icon.addEventListener('mouseenter', function (e) { showThumbPreview(node.thumbCanvas, e); });
+		node.icon.addEventListener('mousemove', moveThumbPreview);
+		node.icon.addEventListener('mouseleave', hideThumbPreview);
+	}
+	node.icon.innerHTML = '';
+	canvas.className = 'layer-thumb';
+	node.icon.appendChild(canvas);
+	node.thumbCanvas = canvas;
+}
+
+function isThumbNodeOn(node) {
+	return node.item.mode === 'locked' || (node.input && node.input.checked);
+}
+
+function hasPsdPixels(node) {
+	if (node.item.type === 'folder') return node.children.some(hasPsdPixels);
+	return !!node.psdLayer;
+}
+
+// frame: ドキュメント座標 (x, y) を倍率 s でキャンバスに写す
+function drawThumbNode(node, ctx, frame) {
+	if (node.item.type === 'folder') {
+		composeThumbChildren(node.children, ctx, frame);
+		return;
+	}
+	var layer = node.psdLayer;
+	if (!layer || !layer.canvas) return;
+	ctx.globalAlpha = layer.opacity / 255;
+	ctx.imageSmoothingQuality = 'high';
+	ctx.drawImage(layer.canvas, (layer.left - frame.x) * frame.s, (layer.top - frame.y) * frame.s, layer.width * frame.s, layer.height * frame.s);
+	ctx.globalAlpha = 1;
+}
+
+// 下のレイヤーから重ねる。クリッピングされたレイヤーは直下のベースレイヤーの不透明部分にだけ描く
+function composeThumbChildren(children, ctx, frame) {
+	var base = null;
+	var flush = function () {
+		if (base) ctx.drawImage(base, 0, 0);
+		base = null;
+	};
+	for (var i = children.length - 1; i >= 0; i--) {
+		var c = children[i];
+		if (!hasPsdPixels(c)) continue;
+		var clipping = c.item.type !== 'folder' && c.psdLayer.clipping;
+		if (!clipping) {
+			flush();
+			if (!isThumbNodeOn(c)) continue;
+			base = document.createElement('canvas');
+			base.width = frame.w;
+			base.height = frame.h;
+			drawThumbNode(c, base.getContext('2d'), frame);
+		} else if (base && isThumbNodeOn(c)) {
+			var bctx = base.getContext('2d');
+			bctx.globalCompositeOperation = 'source-atop';
+			drawThumbNode(c, bctx, frame);
+			bctx.globalCompositeOperation = 'source-over';
+		}
+	}
+	flush();
+}
+
+function updateFolderThumb(node) {
+	var leaves = collectThumbLeaves(node, []).filter(function (n) { return n.psdLayer && n.psdLayer.canvas; });
+	if (leaves.length === 0) return;
+	// 別々の PSD が混ざるフォルダは座標系が合わないので作らない
+	var file = leaves[0].item.psdFile;
+	if (leaves.some(function (n) { return n.item.psdFile !== file; })) return;
+
+	// 表示切り替えで画像が動かないよう、範囲は表示状態に関係なく配下全体で決める
+	var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+	leaves.forEach(function (n) {
+		var l = n.psdLayer;
+		x0 = Math.min(x0, l.left);
+		y0 = Math.min(y0, l.top);
+		x1 = Math.max(x1, l.left + l.width);
+		y1 = Math.max(y1, l.top + l.height);
+	});
+	var s = Math.min(1, PsdThumb.STORE_MAX / Math.max(x1 - x0, y1 - y0));
+	var frame = { x: x0, y: y0, s: s, w: Math.max(1, Math.ceil((x1 - x0) * s)), h: Math.max(1, Math.ceil((y1 - y0) * s)) };
+
+	var canvas = node.thumbCanvas || document.createElement('canvas');
+	canvas.width = frame.w;
+	canvas.height = frame.h;
+	composeThumbChildren(node.children, canvas.getContext('2d'), frame);
+	if (!node.thumbCanvas) setThumbCanvas(node, canvas);
+}
+
+// 表示を切り替えたら、上位フォルダの合成サムネイルを作り直す
+function refreshFolderThumbs(node) {
+	for (; node && node.item; node = node.parent) {
+		if (node.thumbCanvas) updateFolderThumb(node);
+	}
+}
+
+function showThumbPreview(src, e) {
+	if (!src) return;
+	var preview = document.getElementById('thumb-preview');
+	var canvas = preview.querySelector('canvas');
+	canvas.width = src.width;
+	canvas.height = src.height;
+	canvas.getContext('2d').drawImage(src, 0, 0);
+	var k = PsdThumb.STORE_MAX / Math.max(src.width, src.height);
+	canvas.style.width = Math.round(src.width * k) + 'px';
+	canvas.style.height = Math.round(src.height * k) + 'px';
+	preview.style.display = 'block';
+	moveThumbPreview(e);
+}
+
+function moveThumbPreview(e) {
+	var preview = document.getElementById('thumb-preview');
+	if (preview.style.display !== 'block') return;
+	var w = preview.offsetWidth;
+	var h = preview.offsetHeight;
+	var x = e.clientX + 16;
+	if (x + w > window.innerWidth) x = Math.max(0, e.clientX - w - 16);
+	var y = Math.min(Math.max(0, e.clientY - h / 2), Math.max(0, window.innerHeight - h));
+	preview.style.left = x + 'px';
+	preview.style.top = y + 'px';
+}
+
+function hideThumbPreview() {
+	document.getElementById('thumb-preview').style.display = 'none';
 }
 
 function updateTheme() {

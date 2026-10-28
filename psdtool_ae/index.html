@@ -11,6 +11,8 @@
 	<div id="controls">
 		<button id="btn-reload">再読み込み</button>
 		<button id="btn-collapse-all" style="margin-top: 5px; font-size: 0.9em;">すべてのフォルダを畳む</button>
+		<label class="silence-check"><input type="checkbox" id="chk-thumbnails">レイヤーのサムネイルを表示</label>
+		<div id="status-thumb"></div>
 
 		<!-- Keyframe Operation Controls -->
 		<div class="keyframe-section" style="margin-top: 10px;">
@@ -151,7 +153,10 @@
 			</div>
 		</div>
 
+		<div id="thumb-preview"><canvas></canvas></div>
+
 		<script src="js/CSInterface.js"></script>
+		<script src="js/psdthumb.js"></script>
 		<script src="js/main.js"></script>
 </body>
 
