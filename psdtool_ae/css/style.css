@@ -19,12 +19,16 @@ body {
 	box-sizing: border-box;
 }
 
+/* パネルが低いときは操作欄をスクロールさせ、ツリーの表示領域を残す */
 #controls {
-	flex: 0 0 auto;
+	flex: 0 1 auto;
+	min-height: 0;
+	overflow-y: auto;
 }
 
 #main-area {
-	flex: 1 1 auto;
+	flex: 1 1 0;
+	min-height: 150px;
 	display: flex;
 	overflow: hidden;
 	margin-top: 10px;
@@ -395,6 +399,9 @@ input[type="radio"] {
 	font-size: 0.9em;
 	min-height: 1.2em;
 	white-space: pre-line;
+	/* メッセージが多いときは欄の中でスクロールする */
+	max-height: 6em;
+	overflow-y: auto;
 }
 
 #lipsync-modal .modal-content,
