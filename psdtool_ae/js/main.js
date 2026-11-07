@@ -32,19 +32,24 @@ document.getElementById('btn-subtitle-apply').addEventListener('click', applySub
 document.getElementById('btn-budoux').addEventListener('click', applyBudoux);
 document.getElementById('btn-batch-generate').addEventListener('click', generateSubtitleAndLipSync);
 
+// Settings Events
+document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
+document.getElementById('settings-modal-close').addEventListener('click', closeSettingsModal);
+document.querySelectorAll('.settings-tab').forEach(function (tab) {
+	tab.addEventListener('click', function () {
+		selectSettingsTab(tab);
+	});
+});
+
 // LipSync Events
-document.getElementById('btn-lipsync-settings').addEventListener('click', openLipSyncModal);
 document.getElementById('btn-lipsync-generate').addEventListener('click', generateLipSync);
 document.getElementById('btn-lipsync-add').addEventListener('click', addLipSyncCandidate);
-document.getElementById('lipsync-modal-close').addEventListener('click', closeLipSyncModal);
 ['lipsync-regex', 'lipsync-lead', 'lipsync-min'].forEach(function (id) {
 	document.getElementById(id).addEventListener('change', saveLipSyncSettingsFromForm);
 });
 
 // Silence Cut Events
-document.getElementById('btn-silence-settings').addEventListener('click', openSilenceModal);
 document.getElementById('btn-silence-cut').addEventListener('click', cutSilence);
-document.getElementById('silence-modal-close').addEventListener('click', closeSilenceModal);
 ['silence-threshold', 'silence-padding', 'silence-split', 'silence-min-gap', 'silence-ripple'].forEach(function (id) {
 	document.getElementById(id).addEventListener('change', saveSilenceSettingsFromForm);
 });
@@ -55,33 +60,23 @@ if (btnMoveKeys) btnMoveKeys.disabled = true;
 
 function getKeyframesFromActiveComp(e) {
 	var isShift = e && e.shiftKey ? true : false;
-	var statusDiv = document.getElementById('status-keyframe');
-	statusDiv.textContent = "取得中...";
-	statusDiv.style.color = "#eeeeee";
-	statusDiv.style.fontWeight = "normal";
+	var statusDiv = beginStatus("取得中...");
 
 	if (btnMoveKeys) btnMoveKeys.disabled = true;
 
 	csInterface.evalScript('getKeyframesFromActiveComp(' + isShift + ')', function (res) {
 		if (res === "true") {
-			statusDiv.textContent = "キーフレームを記録しました";
-			statusDiv.style.color = "#4CAF50"; // 柔らかめの緑
-			statusDiv.style.fontWeight = "bold";
+			setStatus(statusDiv, 'ok', "キーフレームを記録しました");
 			if (btnMoveKeys) btnMoveKeys.disabled = false;
 		} else {
-			statusDiv.textContent = "キーフレームが見つかりませんでした";
-			statusDiv.style.color = "#ff4444"; // 鮮やかな赤
-			statusDiv.style.fontWeight = "bold";
+			setStatusError(statusDiv, "キーフレームが見つかりませんでした");
 			if (btnMoveKeys) btnMoveKeys.disabled = true;
 		}
 	});
 }
 
 function moveKeyframesToCurrentTime() {
-	var statusDiv = document.getElementById('status-keyframe');
-	statusDiv.textContent = "移動中...";
-	statusDiv.style.color = "#eeeeee";
-	statusDiv.style.fontWeight = "normal";
+	var statusDiv = beginStatus("移動中...");
 
 	csInterface.evalScript('moveKeyframesToCurrentTime()', function (res) {
 		var resultObj = { count: 0, status: "false" };
@@ -95,19 +90,12 @@ function moveKeyframesToCurrentTime() {
 		} catch (e) { }
 
 		if (res === "true" || resultObj.status === "success") {
-			statusDiv.textContent = "移動完了 (メモリ消去済)";
+			setStatus(statusDiv, 'ok', "移動完了 (メモリ消去済)");
 			if (btnMoveKeys) btnMoveKeys.disabled = true;
-			statusDiv.style.color = "#4CAF50"; // 柔らかめの緑
-			statusDiv.style.fontWeight = "bold";
-			setTimeout(function () {
-				statusDiv.textContent = "";
-				statusDiv.style.fontWeight = "normal";
-			}, 3000);
+			clearStatusLater(statusDiv);
 		} else {
-			statusDiv.textContent = resultObj.message ? resultObj.message : "記録中のキーフレームがありません";
+			setStatusError(statusDiv, resultObj.message ? resultObj.message : "記録中のキーフレームがありません");
 			if (btnMoveKeys) btnMoveKeys.disabled = true;
-			statusDiv.style.color = "#ff4444"; // 鮮やかな赤
-			statusDiv.style.fontWeight = "bold";
 		}
 	});
 }
@@ -120,10 +108,7 @@ function removeKeyframesAtCurrentTime(e) {
 		return;
 	}
 
-	var statusDiv = document.getElementById('status-keyframe');
-	statusDiv.textContent = "削除中...";
-	statusDiv.style.color = "#eeeeee";
-	statusDiv.style.fontWeight = "normal";
+	var statusDiv = beginStatus("削除中...");
 
 	csInterface.evalScript('removeKeyframesAtCurrentTime(' + isShift + ', ' + isSelectedOnly + ')', function (res) {
 		var resultObj = { count: 0, status: "false" };
@@ -137,17 +122,10 @@ function removeKeyframesAtCurrentTime(e) {
 		} catch (e) { }
 
 		if (resultObj.status === "success") {
-			statusDiv.textContent = "削除完了 (" + resultObj.count + "個)";
-			statusDiv.style.color = "#ff4444";
-			statusDiv.style.fontWeight = "bold";
-			setTimeout(function () {
-				statusDiv.textContent = "";
-				statusDiv.style.fontWeight = "normal";
-			}, 3000);
+			setStatus(statusDiv, 'ok', "削除完了 (" + resultObj.count + "個)");
+			clearStatusLater(statusDiv);
 		} else {
-			statusDiv.textContent = resultObj.message ? resultObj.message : "削除に失敗、またはキーが見つかりません";
-			statusDiv.style.color = "#ff4444";
-			statusDiv.style.fontWeight = "bold";
+			setStatusError(statusDiv, resultObj.message ? resultObj.message : "削除に失敗、またはキーが見つかりません");
 		}
 	});
 }
@@ -171,11 +149,8 @@ window.onclick = function (event) {
 	if (event.target == modal) {
 		modal.style.display = "none";
 	}
-	if (event.target == document.getElementById("lipsync-modal")) {
-		closeLipSyncModal();
-	}
-	if (event.target == document.getElementById("silence-modal")) {
-		closeSilenceModal();
+	if (event.target == document.getElementById("settings-modal")) {
+		closeSettingsModal();
 	}
 }
 
@@ -411,6 +386,7 @@ function loadHierarchy() {
 	csInterface.evalScript('getHierarchy()', function (res) {
 		var data = JSON.parse(res);
 		if (data.status === 'error') {
+			setTreeTitle(null);
 			renderMessage("コンポジションが開かれていません。<br>対象のコンポジションを開いてから「再読み込み」を押してください。");
 		} else {
 			if (data.projectPath) {
@@ -445,7 +421,14 @@ function saveExpansionState() {
 
 function renderMessage(msg) {
 	var container = document.getElementById('tree-container');
-	container.innerHTML = '<p style="color: #bbb; text-align: center; margin-top: 20px;">' + msg + '</p>';
+	container.innerHTML = '<p class="tree-message">' + msg + '</p>';
+}
+
+// レイヤー一覧の見出しに、読み込み中のコンポジション名を出す
+function setTreeTitle(compName) {
+	var title = document.getElementById('tree-title');
+	title.textContent = compName || 'レイヤー一覧';
+	title.title = compName || '';
 }
 
 function collapseAllFolders() {
@@ -465,9 +448,12 @@ function renderTree(data) {
 	container.innerHTML = '';
 
 	if (data.status === 'error') {
+		setTreeTitle(null);
 		renderMessage(data.message);
 		return;
 	}
+
+	setTreeTitle(data.name);
 
 	// カレントのCompIDを記録（次回の保存のため）
 	g_lastCompId = data.id;
@@ -947,6 +933,11 @@ function updateTheme() {
 		setCSSVar('--btn-border', "#aaaaaa");
 		setCSSVar('--btn-hover', "#d0d0d0");
 		setCSSVar('--item-hover', "#e8e8e8");
+		setCSSVar('--input-bg', "#f8f8f8");
+		setCSSVar('--text-muted', "#666666");
+		setCSSVar('--ok', "#2e7d32");
+		setCSSVar('--warn', "#9a6700");
+		setCSSVar('--error', "#c62828");
 	} else {
 		// Dark Theme
 		document.body.style.color = "#cccccc";
@@ -955,6 +946,11 @@ function updateTheme() {
 		setCSSVar('--btn-border', "#505050");
 		setCSSVar('--btn-hover', "#484848");
 		setCSSVar('--item-hover', "#2a2a2a");
+		setCSSVar('--input-bg', "rgba(0, 0, 0, 0.2)");
+		setCSSVar('--text-muted', "#999999");
+		setCSSVar('--ok', "#4caf50");
+		setCSSVar('--warn', "#eebb00");
+		setCSSVar('--error', "#ff5555");
 	}
 
 	if (skin.baseFontSize) {
@@ -1410,16 +1406,34 @@ function parseHostResult(res) {
 	}
 }
 
-function setStatusRunning(statusDiv, message) {
+// 操作の結果はメッセージ欄 1 か所に、直近の操作の分だけ表示する。
+// status-sub は結果が 2 つある操作 (字幕・口パクの一括生成) の 2 つ目に使う
+var g_statusClearTimer = null;
+
+// kind: running / ok / warn / error (色は style.css の .status-*)
+function setStatus(statusDiv, kind, message) {
 	statusDiv.textContent = message;
-	statusDiv.style.color = "#eeeeee";
-	statusDiv.style.fontWeight = "normal";
+	statusDiv.className = 'status-' + kind;
 }
 
 function setStatusError(statusDiv, message) {
-	statusDiv.textContent = message;
-	statusDiv.style.color = "#ff4444";
-	statusDiv.style.fontWeight = "bold";
+	setStatus(statusDiv, 'error', message);
+}
+
+// メッセージ欄を前の操作の分から切り替え、結果を書き込む欄を返す
+function beginStatus(message) {
+	clearTimeout(g_statusClearTimer);
+	setStatus(document.getElementById('status-sub'), 'running', '');
+	var statusDiv = document.getElementById('status-main');
+	setStatus(statusDiv, 'running', message);
+	return statusDiv;
+}
+
+function clearStatusLater(statusDiv) {
+	clearTimeout(g_statusClearTimer);
+	g_statusClearTimer = setTimeout(function () {
+		setStatus(statusDiv, 'running', '');
+	}, 3000);
 }
 
 // レイヤーごとの処理結果 ([{ layer, status, message }]) をステータス欄に表示する
@@ -1435,16 +1449,13 @@ function showLayerResults(statusDiv, label, results) {
 	});
 	var summary = label + ": " + okCount + "件";
 	if (lines.length > 0) summary += " / 未処理: " + lines.length + "件";
-	statusDiv.textContent = [summary].concat(lines).join('\n');
-	statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okCount > 0 ? "#eebb00" : "#ff4444");
-	statusDiv.style.fontWeight = "bold";
+	setStatus(statusDiv, lines.length === 0 ? 'ok' : (okCount > 0 ? 'warn' : 'error'), [summary].concat(lines).join('\n'));
 }
 
 // ------ Subtitle ------
 
 function applySubtitles() {
-	var statusDiv = document.getElementById('status-subtitle');
-	setStatusRunning(statusDiv, "反映中...");
+	var statusDiv = beginStatus("反映中...");
 
 	csInterface.evalScript('applySubtitles(' + JSON.stringify(JSON.stringify(loadLipSyncSettings())) + ')', function (res) {
 		var data = parseHostResult(res);
@@ -1452,13 +1463,12 @@ function applySubtitles() {
 			setStatusError(statusDiv, data.message);
 			return;
 		}
-		showLayerResults(statusDiv, "テキスト反映", data.results);
+		showLayerResults(statusDiv, "字幕反映", data.results);
 	});
 }
 
 function applyBudoux() {
-	var statusDiv = document.getElementById('status-subtitle');
-	setStatusRunning(statusDiv, "改行中...");
+	var statusDiv = beginStatus("改行中...");
 
 	csInterface.evalScript('applyBudoux()', function (res) {
 		var data = parseHostResult(res);
@@ -1470,22 +1480,46 @@ function applyBudoux() {
 	});
 }
 
-// 字幕と口パクを 1 回の操作で生成する。結果はそれぞれのステータス欄に表示する
+// 字幕と口パクを 1 回の操作で生成する。結果はそれぞれ別の行に表示する
 function generateSubtitleAndLipSync() {
-	var subtitleStatus = document.getElementById('status-subtitle');
-	var lipSyncStatus = document.getElementById('status-lipsync');
-	setStatusRunning(subtitleStatus, "生成中...");
-	setStatusRunning(lipSyncStatus, "生成中...");
+	var subtitleStatus = beginStatus("字幕・口パクを生成中...");
+	var lipSyncStatus = document.getElementById('status-sub');
 
 	csInterface.evalScript('generateSubtitleAndLipSync(' + JSON.stringify(JSON.stringify(loadLipSyncSettings())) + ')', function (res) {
 		var data = parseHostResult(res);
 		if (data.status !== 'success') {
 			setStatusError(subtitleStatus, data.message);
-			setStatusError(lipSyncStatus, data.message);
 			return;
 		}
-		showLayerResults(subtitleStatus, "テキスト反映", data.subtitle);
+		showLayerResults(subtitleStatus, "字幕反映", data.subtitle);
 		showLayerResults(lipSyncStatus, "口パク生成", data.lipSync);
+	});
+}
+
+// ------ Settings ------
+
+function openSettingsModal() {
+	loadLipSyncForm();
+	loadSilenceForm();
+	document.getElementById('settings-modal').style.display = 'block';
+}
+
+function closeSettingsModal() {
+	var unsaved = document.querySelectorAll('#lipsync-config-list .lipsync-card.unsaved');
+	if (unsaved.length > 0 && !confirm('保存されていない口パク設定があります。閉じてもよろしいですか？')) {
+		return;
+	}
+	if (g_thumbSelectClose) g_thumbSelectClose();
+	document.getElementById('settings-modal').style.display = 'none';
+}
+
+function selectSettingsTab(tab) {
+	if (g_thumbSelectClose) g_thumbSelectClose();
+	document.querySelectorAll('.settings-tab').forEach(function (t) {
+		t.classList.toggle('active', t === tab);
+	});
+	document.querySelectorAll('.settings-pane').forEach(function (pane) {
+		pane.classList.toggle('active', pane.id === tab.dataset.pane);
 	});
 }
 
@@ -1532,7 +1566,7 @@ function saveLipSyncSettingsFromForm() {
 	}));
 }
 
-function openLipSyncModal() {
+function loadLipSyncForm() {
 	var settings = loadLipSyncSettings();
 	document.getElementById('lipsync-regex').value = settings.regex;
 	document.getElementById('lipsync-lead').value = settings.leadFrames;
@@ -1540,7 +1574,6 @@ function openLipSyncModal() {
 
 	var list = document.getElementById('lipsync-config-list');
 	list.innerHTML = '<p class="lipsync-empty">読み込み中...</p>';
-	document.getElementById('lipsync-modal').style.display = 'block';
 
 	csInterface.evalScript('getLipSyncConfigs()', function (res) {
 		var data;
@@ -1558,15 +1591,6 @@ function openLipSyncModal() {
 		updateLipSyncEmptyMessage();
 		refreshLipSyncCandidates();
 	});
-}
-
-function closeLipSyncModal() {
-	var unsaved = document.querySelectorAll('#lipsync-config-list .lipsync-card.unsaved');
-	if (unsaved.length > 0 && !confirm('保存されていない設定があります。閉じてもよろしいですか？')) {
-		return;
-	}
-	if (g_thumbSelectClose) g_thumbSelectClose();
-	document.getElementById('lipsync-modal').style.display = 'none';
 }
 
 function updateLipSyncEmptyMessage() {
@@ -1990,9 +2014,8 @@ function createLipSyncCard(compId, title, speaker, map, layerNames, saved) {
 }
 
 function generateLipSync() {
-	var statusDiv = document.getElementById('status-lipsync');
+	var statusDiv = beginStatus("生成中...");
 	var settings = loadLipSyncSettings();
-	setStatusRunning(statusDiv, "生成中...");
 
 	csInterface.evalScript('generateLipSync(' + JSON.stringify(JSON.stringify(settings)) + ')', function (res) {
 		var data = parseHostResult(res);
@@ -2039,7 +2062,7 @@ function saveSilenceSettingsFromForm() {
 	document.getElementById('silence-min-gap').disabled = !split;
 }
 
-function openSilenceModal() {
+function loadSilenceForm() {
 	var settings = loadSilenceSettings();
 	document.getElementById('silence-threshold').value = settings.thresholdDb;
 	document.getElementById('silence-padding').value = settings.paddingMs;
@@ -2047,11 +2070,6 @@ function openSilenceModal() {
 	document.getElementById('silence-min-gap').value = settings.minGapMs;
 	document.getElementById('silence-min-gap').disabled = !settings.split;
 	document.getElementById('silence-ripple').checked = settings.ripple;
-	document.getElementById('silence-modal').style.display = 'block';
-}
-
-function closeSilenceModal() {
-	document.getElementById('silence-modal').style.display = 'none';
 }
 
 // WAV ファイルを読み込み、窓ごとの音量 (全チャンネルの RMS, dBFS) を返す
@@ -2162,22 +2180,14 @@ function detectVoicedRanges(levels, settings) {
 }
 
 function cutSilence() {
-	var statusDiv = document.getElementById('status-silence');
+	var statusDiv = beginStatus("解析中...");
 	var settings = loadSilenceSettings();
-	var showError = function (message) {
-		statusDiv.textContent = message;
-		statusDiv.style.color = "#ff4444";
-		statusDiv.style.fontWeight = "bold";
-	};
-	statusDiv.textContent = "解析中...";
-	statusDiv.style.color = "#eeeeee";
-	statusDiv.style.fontWeight = "normal";
 
 	csInterface.evalScript('getSelectedAudioLayers()', function (res) {
 		var data;
 		try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
 		if (data.status !== 'success') {
-			showError(data.message);
+			setStatusError(statusDiv, data.message);
 			return;
 		}
 
@@ -2198,7 +2208,7 @@ function cutSilence() {
 			}
 		});
 		if (items.length === 0) {
-			showError(["無音カット: 0件"].concat(lines).join('\n'));
+			setStatusError(statusDiv, ["無音カット: 0件"].concat(lines).join('\n'));
 			return;
 		}
 
@@ -2207,7 +2217,7 @@ function cutSilence() {
 			var result;
 			try { result = JSON.parse(res2); } catch (e) { result = { status: 'error', message: res2 }; }
 			if (result.status !== 'success') {
-				showError(result.message);
+				setStatusError(statusDiv, result.message);
 				return;
 			}
 
@@ -2217,9 +2227,7 @@ function cutSilence() {
 			});
 			var summary = "無音カット: " + okLines.length + "件";
 			if (lines.length > 0) summary += " / 未処理: " + lines.length + "件";
-			statusDiv.textContent = [summary].concat(okLines, lines).join('\n');
-			statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okLines.length > 0 ? "#eebb00" : "#ff4444");
-			statusDiv.style.fontWeight = "bold";
+			setStatus(statusDiv, lines.length === 0 ? 'ok' : (okLines.length > 0 ? 'warn' : 'error'), [summary].concat(okLines, lines).join('\n'));
 		});
 	});
 }

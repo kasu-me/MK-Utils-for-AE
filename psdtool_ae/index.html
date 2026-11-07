@@ -9,104 +9,101 @@
 
 <body>
 	<div id="controls">
-		<button id="btn-reload">再読み込み</button>
-		<button id="btn-collapse-all" style="margin-top: 5px; font-size: 0.9em;">すべてのフォルダを畳む</button>
-		<label class="silence-check"><input type="checkbox" id="chk-thumbnails">レイヤーのサムネイルを表示</label>
-		<div id="status-thumb"></div>
-
-		<!-- Keyframe Operation Controls -->
-		<div class="keyframe-section" style="margin-top: 10px;">
-			<div class="section-label" style="font-weight:600; margin-bottom:6px;">キーフレーム操作</div>
-			<div style="display: flex; gap: 5px; align-items: center;">
-				<button id="btn-get-keys" style="flex: 1;">取得</button>
-				<button id="btn-move-keys" style="flex: 1;">移動</button>
-				<button id="btn-delete-keys" style="flex: 1;color: #ff6666;" title="現在の時間のキーフレームを全階層から削除&#10;Shift+クリック: 現在の時間以降すべて&#10;Ctrl+クリック: 選択レイヤー（プリコンポの中身を含む）のみ&#10;Ctrl+Shift+クリック: 選択レイヤーの現在の時間以降すべて">削除</button>
+		<div class="action-row">
+			<div class="action-label">キーフレーム</div>
+			<div class="action-buttons">
+				<button id="btn-get-keys" title="現在の時間のキーフレームを全階層から記録&#10;Shift+クリック: 現在の時間以降すべて">取得</button>
+				<button id="btn-move-keys" title="記録したキーフレームを現在の時間へ移動">移動</button>
+				<button id="btn-delete-keys" title="現在の時間のキーフレームを全階層から削除&#10;Shift+クリック: 現在の時間以降すべて&#10;Ctrl+クリック: 選択レイヤー（プリコンポの中身を含む）のみ&#10;Ctrl+Shift+クリック: 選択レイヤーの現在の時間以降すべて">削除</button>
+				<button id="btn-settings" title="字幕・口パク、無音カット、レイヤー一覧の設定">⚙ 設定</button>
 			</div>
-			<div id="status-keyframe" style="margin-top: 5px; color: #888; font-size: 0.9em; min-height: 1.2em;"></div>
 		</div>
 
-		<!-- Subtitle Controls -->
-		<div class="subtitle-section" style="margin-top: 10px;">
-			<div class="section-label" style="font-weight:600; margin-bottom:6px;">字幕</div>
-			<div style="display: flex; gap: 5px; align-items: center;">
-				<button id="btn-subtitle-apply" style="flex: 1;" title="選択した音声レイヤーと同名のtxtファイルの内容を字幕として反映">テキスト反映</button>
-				<button id="btn-budoux" style="flex: 1;" title="選択したテキストレイヤーをBudouXで自然な位置に改行&#10;Source Textのキーフレームを選択している場合は、そのキーフレームのみ">BudouX改行</button>
+		<!-- 左から作業順 (無音カットは字幕・口パクの生成より前に行う) -->
+		<div class="action-row">
+			<div class="action-label" title="タイムラインで選択した音声レイヤーが対象です">選択音声</div>
+			<div class="action-buttons">
+				<button id="btn-silence-cut" title="選択した音声レイヤー(WAV)の無音部分に合わせてイン/アウトを切り詰める&#10;元のファイルは変更しません&#10;字幕・口パクの生成より前に実行してください">無音カット</button>
+				<button id="btn-subtitle-apply" title="選択した音声レイヤーと同名のtxtファイルの内容を字幕として反映">字幕反映</button>
+				<button id="btn-lipsync-generate" title="選択した音声レイヤーと同名のlabファイルから口パクを生成">口パク生成</button>
+				<button id="btn-batch-generate" class="btn-primary" title="選択した音声レイヤーから字幕と口パクをまとめて生成&#10;Ctrl+Zで両方まとめて取り消せます">字幕・口パク一括</button>
 			</div>
-			<div id="status-subtitle"></div>
 		</div>
 
-		<!-- LipSync Controls -->
-		<div class="lipsync-section" style="margin-top: 10px;">
-			<div class="section-label" style="font-weight:600; margin-bottom:6px;">口パク</div>
-			<div style="display: flex; gap: 5px; align-items: center;">
-				<button id="btn-lipsync-generate" style="flex: 1;" title="選択した音声レイヤーと同名のlabファイルから口パクを生成">選択音声から口パク生成</button>
+		<div class="action-row">
+			<div class="action-label" title="タイムラインで選択したテキストレイヤーが対象です">選択テキスト</div>
+			<div class="action-buttons">
+				<button id="btn-budoux" title="選択したテキストレイヤーをBudouXで自然な位置に改行&#10;Source Textのキーフレームを選択している場合は、そのキーフレームのみ">BudouX改行</button>
 			</div>
-			<div id="status-lipsync"></div>
 		</div>
 
-		<!-- Subtitle + LipSync -->
-		<div style="display: flex; gap: 5px; align-items: center; margin-top: 10px;">
-			<button id="btn-lipsync-settings" style="flex: 1;">字幕・口パク設定</button>
-			<button id="btn-batch-generate" style="flex: 2;" title="選択した音声レイヤーから字幕と口パクをまとめて生成&#10;Ctrl+Zで両方まとめて取り消せます">選択音声から字幕・口パクを一括生成</button>
-		</div>
-
-		<!-- Silence Cut Controls -->
-		<div class="silence-section" style="margin-top: 10px;">
-			<div class="section-label" style="font-weight:600; margin-bottom:6px;">無音カット</div>
-			<div style="display: flex; gap: 5px; align-items: center;">
-				<button id="btn-silence-settings" style="flex: 1;">無音カット設定</button>
-				<button id="btn-silence-cut" style="flex: 2;" title="選択した音声レイヤー(WAV)の無音部分に合わせてイン/アウトを切り詰める&#10;元のファイルは変更しません">選択音声の無音カット</button>
-			</div>
-			<div id="status-silence"></div>
+		<!-- 直近の操作の結果を表示する -->
+		<div id="status-area">
+			<div id="status-main"></div>
+			<div id="status-sub"></div>
 		</div>
 	</div>
 
 	<div id="main-area">
 		<div id="tree-section">
+			<div class="pane-header">
+				<span id="tree-title" class="pane-title">レイヤー一覧</span>
+				<div class="pane-header-buttons">
+					<button id="btn-reload" title="アクティブなコンポジションを読み込み直す">再読み込み</button>
+					<button id="btn-collapse-all">すべてのフォルダを畳む</button>
+				</div>
+			</div>
+			<div id="status-thumb"></div>
 			<div id="tree-container">
 				<!-- Tree will be rendered here -->
-				<p style="text-align:center; color:#888;">コンポジションを読み込んでください</p>
+				<p class="tree-message">コンポジションを読み込んでください</p>
 			</div>
 		</div>
 		<div id="preset-section">
-			<div class="preset-header">
-				<span>Presets</span>
-				<div style="display:flex;">
-					<button id="btn-import-preset" title="Import"
-						style="width:auto; padding:2px 6px; margin-right:2px;">In</button>
-					<button id="btn-export-preset" title="Export"
-						style="width:auto; padding:2px 6px; margin-right:2px;">Ex</button>
-					<button id="btn-add-preset" title="Add" style="width:auto; padding:2px 8px;">+</button>
+			<div class="pane-header">
+				<span class="pane-title">プリセット</span>
+				<div class="pane-header-buttons">
+					<button id="btn-add-preset" title="現在の表示状態をプリセットとして保存">＋ 追加</button>
 				</div>
 			</div>
 			<div id="preset-list">
 				<!-- Presets will be rendered here -->
 			</div>
-			<button id="btn-manage-storage"
-				style="margin-top: 10px; width: 100%; font-size: 0.8em; opacity: 0.7;">プリセット整理</button>
-		</div>
-
-		<!-- Storage Management Modal -->
-		<div id="storage-modal" class="modal">
-			<div class="modal-content">
-				<div class="modal-header">
-					<h3>保存済みプリセット管理</h3>
-					<span class="close-modal">&times;</span>
-				</div>
-				<div id="storage-list-container">
-					<!-- List items will be injected here -->
-				</div>
+			<div id="preset-footer">
+				<button id="btn-import-preset" title="JSONファイルからプリセットを読み込む">読込</button>
+				<button id="btn-export-preset" title="このコンポジションのプリセットをJSONファイルに書き出す">書出</button>
+				<button id="btn-manage-storage" title="保存済みのプリセットを一覧・削除する">整理</button>
 			</div>
 		</div>
+	</div>
 
-		<!-- LipSync Settings Modal -->
-		<div id="lipsync-modal" class="modal">
-			<div class="modal-content">
-				<div class="modal-header">
-					<h3>字幕・口パク設定</h3>
-					<span class="close-modal" id="lipsync-modal-close">&times;</span>
-				</div>
-				<div id="lipsync-modal-body">
+	<!-- Storage Management Modal -->
+	<div id="storage-modal" class="modal">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3>保存済みプリセット管理</h3>
+				<span class="close-modal">&times;</span>
+			</div>
+			<div id="storage-list-container">
+				<!-- List items will be injected here -->
+			</div>
+		</div>
+	</div>
+
+	<!-- Settings Modal -->
+	<div id="settings-modal" class="modal">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3>設定</h3>
+				<span class="close-modal" id="settings-modal-close">&times;</span>
+			</div>
+			<div class="settings-tabs">
+				<button class="settings-tab active" data-pane="settings-pane-lipsync">字幕・口パク</button>
+				<button class="settings-tab" data-pane="settings-pane-silence">無音カット</button>
+				<button class="settings-tab" data-pane="settings-pane-view">レイヤー一覧</button>
+			</div>
+			<div id="settings-body">
+				<div id="settings-pane-lipsync" class="settings-pane active">
 					<div class="lipsync-group-label">共通設定</div>
 					<div class="lipsync-field">
 						<label for="lipsync-regex">話者名の抽出正規表現</label>
@@ -133,17 +130,7 @@
 						<button id="btn-lipsync-add">追加</button>
 					</div>
 				</div>
-			</div>
-		</div>
-
-		<!-- Silence Cut Settings Modal -->
-		<div id="silence-modal" class="modal">
-			<div class="modal-content">
-				<div class="modal-header">
-					<h3>無音カット設定</h3>
-					<span class="close-modal" id="silence-modal-close">&times;</span>
-				</div>
-				<div id="silence-modal-body">
+				<div id="settings-pane-silence" class="settings-pane">
 					<div class="lipsync-group-label">判定</div>
 					<div class="lipsync-field-row">
 						<div class="lipsync-field">
@@ -168,14 +155,18 @@
 
 					<p class="silence-note">元のWAVファイルは変更せず、レイヤーのイン/アウトだけを切り詰めます。口パク・字幕の生成より前に実行してください。</p>
 				</div>
+				<div id="settings-pane-view" class="settings-pane">
+					<label class="silence-check"><input type="checkbox" id="chk-thumbnails">レイヤーのサムネイルを表示</label>
+				</div>
 			</div>
 		</div>
+	</div>
 
-		<div id="thumb-preview"><canvas></canvas></div>
+	<div id="thumb-preview"><canvas></canvas></div>
 
-		<script src="js/CSInterface.js"></script>
-		<script src="js/psdthumb.js"></script>
-		<script src="js/main.js"></script>
+	<script src="js/CSInterface.js"></script>
+	<script src="js/psdthumb.js"></script>
+	<script src="js/main.js"></script>
 </body>
 
 </html>

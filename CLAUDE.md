@@ -97,11 +97,13 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 - `g_expansionState` — `{[nodeId]: bool}` — which tree nodes are expanded
 - `g_storedKeyframes` — array of keyframe references collected for move operations
 - Presets stored in localStorage with key: `psdtool_presets_[projectPath]_[compId]`
+- Operation results go to the single `#status-area`, showing only the latest operation: `beginStatus()` starts one and returns the line to write to, `setStatus()` / `setStatusError()` set the text and color class (`.status-*`). Theme-dependent colors are CSS variables set in `updateTheme()`.
+- All settings live in the single tabbed `#settings-modal` (`openSettingsModal()` / `closeSettingsModal()`); action buttons stay directly on the panel.
 
 **LipSync (口パク):**
 - Per-character config is stored in the **comment field of the mouth-variant folder comp** as `"[psdtool_lipsync]" + JSON` (`{ speaker, map: { a, i, u, e, o, n → layer name } }`), so it travels with the .aep (template projects). See `getLipSyncConfigs()` / `saveLipSyncConfig()` in hostscript.jsx.
 - `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex, finds the mouth comp nested in the active comp, and writes HOLD opacity keys. Regeneration only clears keys inside each selected audio's visible range (in/out point shifted by lead frames), processed in start-time order so a later clip wins; leftovers outside that range are left as-is. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
-- Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`. The regex is shared with subtitles; the single settings modal is `#lipsync-modal` (titled 字幕・口パク設定).
+- Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`. The regex is shared with subtitles; the form is the 字幕・口パク tab of `#settings-modal`.
 
 **Subtitle / BudouX (字幕):**
 - `applySubtitles()` reads `<audio basename>.txt`, extracts a prefix from the file name by regex, and writes to the first text layer whose name starts with it. Layers it cannot process are reported per layer with a reason instead of being skipped silently. It uses the same regex setting as LipSync.
@@ -118,7 +120,7 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 - AE's ExtendScript has no API for getting layer images, so the **panel** reads the source PSD/PSB directly (`js/psdthumb.js`, `PsdThumb.load()`). Supports RGB/Grayscale, 8/16bit, RAW/RLE/ZIP (ZIP needs `DecompressionStream`), and applies layer masks. Blend modes and layer effects are ignored. Per-layer images are downscaled (long side 160px) and cached by path + mtime.
 - `getHierarchy()` adds `psdFile` / `psdName` to PSD-derived footage layers (footage name is `"<PSD layer name>/<file>.psd"`). The panel matches AE nodes to PSD layers by the longest suffix of the name path (AE may have extra parent comps above the PSD comp); duplicates are assigned in top-to-bottom order.
 - Folder thumbnails composite currently-checked descendants (with clipping) and are redrawn on toggle via `refreshFolderThumbs()`. On/off setting in localStorage key `psdtool_show_thumbnails`.
-- The LipSync modal's mouth-variant dropdowns are a custom `createThumbSelect()` (native `<select>` options get no mouse events, so no hover preview). It looks up thumbnails from the current tree (`g_thumbRoot`) by the mouth comp's `compId` + layer name, and exposes `.value` like a select.
+- The mouth-variant dropdowns in the settings modal's 字幕・口パク tab are a custom `createThumbSelect()` (native `<select>` options get no mouse events, so no hover preview). It looks up thumbnails from the current tree (`g_thumbRoot`) by the mouth comp's `compId` + layer name, and exposes `.value` like a select.
 
 **Hierarchy node (JSON from backend):**
 ```json
