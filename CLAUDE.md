@@ -14,8 +14,7 @@ This is a monorepo containing multiple independent tools:
 
 | Directory | Type | Description |
 |-----------|------|-------------|
-| [psdtool_ae/](psdtool_ae/) | CEP Extension | PSD layer visibility control panel |
-| [ImportSubtitles/](ImportSubtitles/) | ScriptUI Panel | Subtitle auto-generation script |
+| [psdtool_ae/](psdtool_ae/) | CEP Extension | PSD layer visibility control, subtitle and lip sync generation panel |
 | [lyrics-mapper/](lyrics-mapper/) | Browser Tool | Lyric block editor (exports JSON for AE) |
 | [lyrics_ae/](lyrics_ae/) | CEP Extension | Lyrics JSON importer for After Effects |
 
@@ -34,12 +33,6 @@ C:\Users\<user>\AppData\Roaming\Adobe\CEP\extensions\psdtool_ae\
 
 C:\Users\<user>\AppData\Roaming\Adobe\CEP\extensions\lyrics_ae\
   → symlink target: D:\workspace_git\psdtool_ae\lyrics_ae\
-```
-
-**ScriptUI panel installation path (Windows):**
-```
-C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels\ImportSubtitles.jsx
-  → symlink target: D:\workspace_git\psdtool_ae\ImportSubtitles\ImportSubtitles.jsx
 ```
 
 To update symlinks after reorganization, run `update-symlinks-admin.ps1` as administrator.
@@ -62,8 +55,7 @@ CEP Panel (Chromium process)
 ```
 
 - **[psdtool_ae/js/main.js](psdtool_ae/js/main.js)** — All frontend logic: tree rendering, event handling, preset persistence (localStorage), keyframe button logic, theme sync with AE
-- **[psdtool_ae/jsx/hostscript.jsx](psdtool_ae/jsx/hostscript.jsx)** — All AE scripting: layer hierarchy traversal, visibility toggling, keyframe get/move/delete
-- **[ImportSubtitles/ImportSubtitles.jsx](ImportSubtitles/ImportSubtitles.jsx)** — Standalone ScriptUI panel (not part of the CEP panel) for subtitle import with BudouX Japanese line-breaking
+- **[psdtool_ae/jsx/hostscript.jsx](psdtool_ae/jsx/hostscript.jsx)** — All AE scripting: layer hierarchy traversal, visibility toggling, keyframe get/move/delete, lip sync, silence cut, subtitles, BudouX
 - **[psdtool_ae/CSXS/manifest.xml](psdtool_ae/CSXS/manifest.xml)** — Extension ID `com.example.psdtool.panel`, targets AEFT (After Effects), CSXS runtime 9.0
 
 ## CEP Bridge Pattern
@@ -108,8 +100,14 @@ This convention is parsed in `getHierarchy()` in [psdtool_ae/jsx/hostscript.jsx]
 
 **LipSync (口パク):**
 - Per-character config is stored in the **comment field of the mouth-variant folder comp** as `"[psdtool_lipsync]" + JSON` (`{ speaker, map: { a, i, u, e, o, n → layer name } }`), so it travels with the .aep (template projects). See `getLipSyncConfigs()` / `saveLipSyncConfig()` in hostscript.jsx.
-- `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex (same convention as ImportSubtitles), finds the mouth comp nested in the active comp, and writes HOLD opacity keys. Regeneration only clears keys inside each selected audio's visible range (in/out point shifted by lead frames), processed in start-time order so a later clip wins; leftovers outside that range are left as-is. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
-- Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`.
+- `generateLipSync()` reads `<audio basename>.lab` (HTK label, 100ns units) next to each selected audio layer, extracts the speaker from the file name by regex, finds the mouth comp nested in the active comp, and writes HOLD opacity keys. Regeneration only clears keys inside each selected audio's visible range (in/out point shifted by lead frames), processed in start-time order so a later clip wins; leftovers outside that range are left as-is. The pure logic (`lipSyncParseLab` / `lipSyncBuildShapes` / `lipSyncQuantize`) has no AE dependencies.
+- Panel-wide settings (regex, lead frames, min frames) are in localStorage key `psdtool_lipsync_settings`. The regex is shared with subtitles; the single settings modal is `#lipsync-modal` (titled 字幕・口パク設定).
+
+**Subtitle / BudouX (字幕):**
+- `applySubtitles()` reads `<audio basename>.txt`, extracts a prefix from the file name by regex, and writes to the first text layer whose name starts with it. Layers it cannot process are reported per layer with a reason instead of being skipped silently. It uses the same regex setting as LipSync.
+- It first removes Source Text / Opacity keys of all text layers within each selected audio layer's `[inPoint, outPoint)`, then writes the subtitle key at inPoint and HOLD opacity keys (target 100, others 0), in start-time order.
+- `applyBudoux()` embeds the BudouX Japanese phrase-breaking model inline in hostscript.jsx as `BUDOUX_MODEL`. The model is from Google's BudouX project (Apache 2.0), so keep its license notice.
+- `generateSubtitleAndLipSync()` runs `subtitleProcessLayers()` and `lipSyncProcessLayers()` on the same selection inside one undo group. The `*ProcessLayers` functions open no undo group themselves; the bridge functions own it.
 
 **Silence Cut (無音カット):**
 - Non-destructive: the WAV file is never rewritten; only the selected audio layers' in/out points are trimmed (frame-aligned), so `.lab` / `.txt` alignment (which uses `startTime` / `inPoint`) stays valid.
@@ -170,14 +168,3 @@ When editing shared logic, apply changes to **both** files.
 - **[lyrics_ae/CSXS/manifest.xml](lyrics_ae/CSXS/manifest.xml)** — Extension ID `com.example.lyrics.panel`, targets AEFT, CSXS runtime 9.0
 
 **Keyframe mode note:** When a block's endSec matches the next block's startSec (within 0.001 s), the trailing empty-string keyframe is omitted to avoid redundancy.
-
-## ImportSubtitles.jsx Specifics
-
-**[ImportSubtitles/ImportSubtitles.jsx](ImportSubtitles/ImportSubtitles.jsx)** is a **separate ScriptUI panel**, not loaded through CEP. It is installed to:
-```
-C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels\
-```
-
-It embeds the BudouX Japanese phrase-breaking model inline as a hardcoded data structure (lines ~18-19). The model is from Google's BudouX project (Apache 2.0). The `budouxParse()` function uses this model to determine phrase boundaries for intelligent line-wrapping of Japanese subtitle text.
-
-"テキスト反映" first removes Source Text / Opacity keys of all text layers within each selected audio layer's `[inPoint, outPoint)`, then writes the subtitle key at inPoint and HOLD opacity keys (target 100, others 0), in start-time order.

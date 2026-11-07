@@ -25,14 +25,29 @@
 			<div id="status-keyframe" style="margin-top: 5px; color: #888; font-size: 0.9em; min-height: 1.2em;"></div>
 		</div>
 
+		<!-- Subtitle Controls -->
+		<div class="subtitle-section" style="margin-top: 10px;">
+			<div class="section-label" style="font-weight:600; margin-bottom:6px;">字幕</div>
+			<div style="display: flex; gap: 5px; align-items: center;">
+				<button id="btn-subtitle-apply" style="flex: 1;" title="選択した音声レイヤーと同名のtxtファイルの内容を字幕として反映">テキスト反映</button>
+				<button id="btn-budoux" style="flex: 1;" title="選択したテキストレイヤーをBudouXで自然な位置に改行&#10;Source Textのキーフレームを選択している場合は、そのキーフレームのみ">BudouX改行</button>
+			</div>
+			<div id="status-subtitle"></div>
+		</div>
+
 		<!-- LipSync Controls -->
 		<div class="lipsync-section" style="margin-top: 10px;">
 			<div class="section-label" style="font-weight:600; margin-bottom:6px;">口パク</div>
 			<div style="display: flex; gap: 5px; align-items: center;">
-				<button id="btn-lipsync-settings" style="flex: 1;">口パク設定</button>
-				<button id="btn-lipsync-generate" style="flex: 2;" title="選択した音声レイヤーと同名のlabファイルから口パクを生成">選択音声から口パク生成</button>
+				<button id="btn-lipsync-generate" style="flex: 1;" title="選択した音声レイヤーと同名のlabファイルから口パクを生成">選択音声から口パク生成</button>
 			</div>
 			<div id="status-lipsync"></div>
+		</div>
+
+		<!-- Subtitle + LipSync -->
+		<div style="display: flex; gap: 5px; align-items: center; margin-top: 10px;">
+			<button id="btn-lipsync-settings" style="flex: 1;">字幕・口パク設定</button>
+			<button id="btn-batch-generate" style="flex: 2;" title="選択した音声レイヤーから字幕と口パクをまとめて生成&#10;Ctrl+Zで両方まとめて取り消せます">選択音声から字幕・口パクを一括生成</button>
 		</div>
 
 		<!-- Silence Cut Controls -->
@@ -88,7 +103,7 @@
 		<div id="lipsync-modal" class="modal">
 			<div class="modal-content">
 				<div class="modal-header">
-					<h3>口パク設定</h3>
+					<h3>字幕・口パク設定</h3>
 					<span class="close-modal" id="lipsync-modal-close">&times;</span>
 				</div>
 				<div id="lipsync-modal-body">
@@ -97,6 +112,9 @@
 						<label for="lipsync-regex">話者名の抽出正規表現</label>
 						<input type="text" id="lipsync-regex">
 					</div>
+					<p class="silence-note">音声ファイル名 (拡張子なし) のキャプチャグループ () の部分を話者名として取り出します。字幕はこの名前で始まるテキストレイヤーに、口パクはこの話者名のキャラクターに反映します。</p>
+
+					<div class="lipsync-group-label">口パク</div>
 					<div class="lipsync-field-row">
 						<div class="lipsync-field">
 							<label for="lipsync-lead">先行フレーム数</label>

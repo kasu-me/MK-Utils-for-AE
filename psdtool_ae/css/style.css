@@ -387,6 +387,7 @@ input[type="radio"] {
 }
 
 /* LipSync */
+#status-subtitle,
 #status-lipsync,
 #status-silence,
 #status-thumb {

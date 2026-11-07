@@ -27,6 +27,11 @@ document.getElementById('btn-get-keys').addEventListener('click', getKeyframesFr
 document.getElementById('btn-move-keys').addEventListener('click', moveKeyframesToCurrentTime);
 document.getElementById('btn-delete-keys').addEventListener('click', removeKeyframesAtCurrentTime);
 
+// Subtitle Events
+document.getElementById('btn-subtitle-apply').addEventListener('click', applySubtitles);
+document.getElementById('btn-budoux').addEventListener('click', applyBudoux);
+document.getElementById('btn-batch-generate').addEventListener('click', generateSubtitleAndLipSync);
+
 // LipSync Events
 document.getElementById('btn-lipsync-settings').addEventListener('click', openLipSyncModal);
 document.getElementById('btn-lipsync-generate').addEventListener('click', generateLipSync);
@@ -1395,8 +1400,98 @@ function importPresetsFromData(storageKey) {
 	}
 }
 
+// ------ 字幕・口パク・BudouX 共通 ------
+
+function parseHostResult(res) {
+	try {
+		return JSON.parse(res);
+	} catch (e) {
+		return { status: 'error', message: res };
+	}
+}
+
+function setStatusRunning(statusDiv, message) {
+	statusDiv.textContent = message;
+	statusDiv.style.color = "#eeeeee";
+	statusDiv.style.fontWeight = "normal";
+}
+
+function setStatusError(statusDiv, message) {
+	statusDiv.textContent = message;
+	statusDiv.style.color = "#ff4444";
+	statusDiv.style.fontWeight = "bold";
+}
+
+// レイヤーごとの処理結果 ([{ layer, status, message }]) をステータス欄に表示する
+function showLayerResults(statusDiv, label, results) {
+	var okCount = 0;
+	var lines = [];
+	results.forEach(function (r) {
+		if (r.status === 'ok') {
+			okCount++;
+		} else {
+			lines.push('・' + r.layer + ': ' + r.message);
+		}
+	});
+	var summary = label + ": " + okCount + "件";
+	if (lines.length > 0) summary += " / 未処理: " + lines.length + "件";
+	statusDiv.textContent = [summary].concat(lines).join('\n');
+	statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okCount > 0 ? "#eebb00" : "#ff4444");
+	statusDiv.style.fontWeight = "bold";
+}
+
+// ------ Subtitle ------
+
+function applySubtitles() {
+	var statusDiv = document.getElementById('status-subtitle');
+	setStatusRunning(statusDiv, "反映中...");
+
+	csInterface.evalScript('applySubtitles(' + JSON.stringify(JSON.stringify(loadLipSyncSettings())) + ')', function (res) {
+		var data = parseHostResult(res);
+		if (data.status !== 'success') {
+			setStatusError(statusDiv, data.message);
+			return;
+		}
+		showLayerResults(statusDiv, "テキスト反映", data.results);
+	});
+}
+
+function applyBudoux() {
+	var statusDiv = document.getElementById('status-subtitle');
+	setStatusRunning(statusDiv, "改行中...");
+
+	csInterface.evalScript('applyBudoux()', function (res) {
+		var data = parseHostResult(res);
+		if (data.status !== 'success') {
+			setStatusError(statusDiv, data.message);
+			return;
+		}
+		showLayerResults(statusDiv, "BudouX改行", data.results);
+	});
+}
+
+// 字幕と口パクを 1 回の操作で生成する。結果はそれぞれのステータス欄に表示する
+function generateSubtitleAndLipSync() {
+	var subtitleStatus = document.getElementById('status-subtitle');
+	var lipSyncStatus = document.getElementById('status-lipsync');
+	setStatusRunning(subtitleStatus, "生成中...");
+	setStatusRunning(lipSyncStatus, "生成中...");
+
+	csInterface.evalScript('generateSubtitleAndLipSync(' + JSON.stringify(JSON.stringify(loadLipSyncSettings())) + ')', function (res) {
+		var data = parseHostResult(res);
+		if (data.status !== 'success') {
+			setStatusError(subtitleStatus, data.message);
+			setStatusError(lipSyncStatus, data.message);
+			return;
+		}
+		showLayerResults(subtitleStatus, "テキスト反映", data.subtitle);
+		showLayerResults(lipSyncStatus, "口パク生成", data.lipSync);
+	});
+}
+
 // ------ LipSync ------
 
+// 字幕・口パク設定。regex は字幕と口パクで共通
 var LIPSYNC_SETTINGS_KEY = 'psdtool_lipsync_settings';
 var LIPSYNC_SHAPES = [
 	{ key: 'a', label: 'あ' },
@@ -1897,35 +1992,15 @@ function createLipSyncCard(compId, title, speaker, map, layerNames, saved) {
 function generateLipSync() {
 	var statusDiv = document.getElementById('status-lipsync');
 	var settings = loadLipSyncSettings();
-	statusDiv.textContent = "生成中...";
-	statusDiv.style.color = "#eeeeee";
-	statusDiv.style.fontWeight = "normal";
+	setStatusRunning(statusDiv, "生成中...");
 
 	csInterface.evalScript('generateLipSync(' + JSON.stringify(JSON.stringify(settings)) + ')', function (res) {
-		var data;
-		try { data = JSON.parse(res); } catch (e) { data = { status: 'error', message: res }; }
-
+		var data = parseHostResult(res);
 		if (data.status !== 'success') {
-			statusDiv.textContent = data.message;
-			statusDiv.style.color = "#ff4444";
-			statusDiv.style.fontWeight = "bold";
+			setStatusError(statusDiv, data.message);
 			return;
 		}
-
-		var okCount = 0;
-		var lines = [];
-		data.results.forEach(function (r) {
-			if (r.status === 'ok') {
-				okCount++;
-			} else {
-				lines.push('・' + r.layer + ': ' + r.message);
-			}
-		});
-		var summary = "口パク生成: " + okCount + "件";
-		if (lines.length > 0) summary += " / 未処理: " + lines.length + "件";
-		statusDiv.textContent = [summary].concat(lines).join('\n');
-		statusDiv.style.color = lines.length === 0 ? "#4CAF50" : (okCount > 0 ? "#eebb00" : "#ff4444");
-		statusDiv.style.fontWeight = "bold";
+		showLayerResults(statusDiv, "口パク生成", data.results);
 	});
 }
 
